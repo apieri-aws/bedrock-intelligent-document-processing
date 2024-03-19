@@ -1,5 +1,5 @@
 """
-kicks off Step Function executions with Queries
+kicks off Step Function executions
 """
 import json
 import logging
@@ -49,17 +49,20 @@ def lambda_handler(event, _):
         filename = filename[:80]
         if s3_bucket and s3_key:
             manifest: tm.IDPManifest = tm.IDPManifest()
-            queries_config = [
-                tm.Query(text="What is the address?",
-                         alias="ADDRESS",
-                         pages=["*"]),
-                tm.Query(text="What is the name?", alias="NAME", pages=["*"])
-            ]
+            # queries_config = [
+            #     tm.Query(text="What is the address?",
+            #              alias="ADDRESS",
+            #              pages=["*"]),
+            #     tm.Query(text="What is the name?", alias="NAME", pages=["*"])
+            # ]
             manifest.s3_path = f"s3://{s3_bucket}/{s3_key}"
-            manifest.queries_config = queries_config
+            # manifest.queries_config = queries_config
             manifest.textract_features = [
-                "QUERIES", "FORMS", "SIGNATURES", "TABLES"
+                "FORMS", "TABLES"
             ]
+            # manifest.textract_features = [
+            #     "QUERIES", "FORMS", "SIGNATURES", "TABLES"
+            # ]            
             logger.debug(f"manifest: {tm.IDPManifestSchema().dumps(manifest)}")
 
             response = step_functions_client.start_execution(

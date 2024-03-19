@@ -7,6 +7,7 @@ import os
 import textractmanifest as tm
 import boto3
 import jinja2
+import base64
 from uuid import uuid4
 
 from typing import Tuple
@@ -31,13 +32,13 @@ def split_s3_path_to_bucket_and_key(s3_path: str) -> Tuple[str, str]:
         )
 
 
-def get_file_from_s3(s3_path: str, range=None) -> bytes:
+def get_image_file_from_s3(s3_path: str, range=None) -> bytes:
     s3_bucket, s3_key = split_s3_path_to_bucket_and_key(s3_path)
     if range:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key, Range=range)
     else:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key)
-    return o.get("Body").read()
+    return base64.b64encode(o.get("Body").read())
 
 
 class ThrottlingException(Exception):
@@ -62,7 +63,7 @@ class BedrockPromptConfig(Model):
         region = boto3.Session().region_name
 
     id = UnicodeAttribute(hash_key=True, attr_name="id")
-    prompt_template = UnicodeAttribute(attr_name="p")
+    prompt_template = UnicodeAttribute(attr_name="v")
 
 def generate_message(bedrock_runtime, model_id, messages, max_tokens,top_p, temp):
 
@@ -128,31 +129,26 @@ def lambda_handler(event, _):
             raise ValueError(f"no DynamoDB item with key: '{ddb_key}' was found")
         prompt_template = ddb_prompt_entry.prompt_template
 
-        # load text document from S3
-        if (
-            "txt_output_location" in event
-            and "TextractOutputCSVPath" in event["txt_output_location"]
-        ):
-            document_text_path = event["txt_output_location"]["TextractOutputCSVPath"]
+        # Load source image from S3
+        if ("originFileURI" in event):
+            document_image_path = event["originFileURI"]
         else:
             raise ValueError(
-                "no ['txt_output_location']['TextractOutputCSVPath'] to get the text file from "
+                "no [originFileURI] to get the text file from "
             )
 
-        document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
-        # apply template
-        jinja_template = jinja2.Template(prompt_template)
-        template_vars = {
-            "document_text": document_text
-        }
-        prompt = jinja_template.render(template_vars)
+        document_image = get_image_file_from_s3(s3_path=document_image_path).decode('utf-8')
 
-        logger.debug(prompt)
+        logger.debug(prompt_template)
         
         message_config = [
-            {"role": "user", "content": [{"type": "text", "text": prompt}]}
-        ]
-                
+            {"role": "user", 
+             "content": [
+                 {"type": "image","source": { "type": "base64","media_type": "image/jpeg","data": document_image}},
+                 {"type": "text", "text": prompt_template}
+             ]}
+        ]    
+        
         response = generate_message(
             bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, messages=message_config, max_tokens=512, temp=0.5, top_p=0.9
         )

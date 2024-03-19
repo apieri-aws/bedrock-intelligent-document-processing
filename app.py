@@ -20,6 +20,7 @@ from textract_cdk_stack_samples.open_search_workflow import OpenSearchWorkflow
 from textract_cdk_stack_samples.test_workflow import TestWorkflow
 from textract_cdk_stack_samples.bedrock_idp_workflow import BedrockIDPWorkflow
 from textract_cdk_stack_samples.bedrock_idp_2_workflow import BedrockIDP2Workflow
+from textract_cdk_stack_samples.bedrock_idp_claude3_workflow import BedrockIDPClaude3Workflow
 
 app = cdk.App()
 
@@ -59,6 +60,7 @@ SimpleSearchPDF(app, "SimpleSearchPDF")
 OpenSearchWorkflow(app, "OpenSearchWorkflow")
 BedrockIDPWorkflow(app, "BedrockIDPWorkflow")
 BedrockIDP2Workflow(app, "BedrockIDP2Workflow")
+BedrockIDPClaude3Workflow(app, "BedrockIDPClaude3Workflow")
 TestWorkflow(app, "TestWorkflow")
 
 app.synth()
