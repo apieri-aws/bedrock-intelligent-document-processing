@@ -94,7 +94,7 @@ def lambda_handler(event, _):
     logger.info(f"LOG_LEVEL: {log_level}")
     logger.info(json.dumps(event))
     bedrock_model_id = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0")
-    fixed_key = os.environ.get("FIXED_KEY", None)
+    # fixed_key = os.environ.get("FIXED_KEY", None)
     s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET')
     s3_output_prefix = os.environ.get('S3_OUTPUT_PREFIX')
     if not s3_output_bucket:
@@ -111,62 +111,93 @@ def lambda_handler(event, _):
             manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event)  # type: ignore
 
         # fixed_key for classification and non fixed key for extraction
-        if fixed_key:
-            ddb_key = fixed_key
-        else:
-            if "classification" in event and "documentType" in event["classification"]:
-                ddb_key = event["classification"]["documentType"]
-                logger.debug(f"document_type: {ddb_key}")
-            else:
-                raise ValueError(
-                    f"no [classification][documentType] given in event: {event}"
-                )
+        # if fixed_key:
+        #     ddb_key = fixed_key
+        # else:
+        #     if "classification" in event and "documentType" in event["classification"]:
+        #         ddb_key = event["classification"]["documentType"]
+        #         logger.debug(f"document_type: {ddb_key}")
+        #     else:
+        #         raise ValueError(
+        #             f"no [classification][documentType] given in event: {event}"
+        #         )
 
-        # Load prompt from DDB
+        # Load classification prompt from DDB
         try:
-            ddb_prompt_entry: BedrockPromptConfig = BedrockPromptConfig.get(ddb_key)
+            ddb_prompt_entry: BedrockPromptConfig = BedrockPromptConfig.get("CLASSIFICATION")
         except DoesNotExist:
-            raise ValueError(f"no DynamoDB item with key: '{ddb_key}' was found")
-        prompt_template = ddb_prompt_entry.prompt_template
+            raise ValueError(f"no DynamoDB item with key: 'CLASSIFICATION' was found")
+        classification_prompt_template = ddb_prompt_entry.prompt_template
 
         # Load source image from S3
-        if ("originFileURI" in event):
-            document_image_path = event["originFileURI"]
+        if ("s3Path" in event["manifest"]):
+            document_image_path = event["manifest"]["s3Path"]
         else:
             raise ValueError(
-                "no [originFileURI] to get the text file from "
+                "no [s3Path] to get the text file from "
             )
 
         document_image = get_image_file_from_s3(s3_path=document_image_path).decode('utf-8')
 
-        logger.debug(prompt_template)
+        logger.debug(classification_prompt_template)
         
-        message_config = [
+        classification_message_config = [
             {"role": "user", 
              "content": [
                  {"type": "image","source": { "type": "base64","media_type": "image/jpeg","data": document_image}},
-                 {"type": "text", "text": prompt_template}
+                 {"type": "text", "text": classification_prompt_template}
              ]}
-        ]    
+        ]
         
-        response = generate_message(
-            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, messages=message_config, max_tokens=512, temp=0.5, top_p=0.9
+        classification_response = generate_message(
+            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, messages=classification_message_config, max_tokens=512, temp=0.5, top_p=0.9
         )
         
-        if "completion" in response:
-            output_text = response['completion']
-        elif "content" in response:
-            output_text =response['content'][0]['text']
-            logger.debug(output_text)
+        if "completion" in classification_response:
+            classification_output_text = classification_response['completion']
+        elif "content" in classification_response:
+            classification_output_text = classification_response['content'][0]['text']
+            logger.debug(classification_output_text)
         else:
-            output_text = ""
+            classification_output_text = ""
 
-        logger.debug(response)
+        logger.debug(classification_response)
+        
+        classification_json = json.loads(classification_output_text)
+        ddb_key = classification_json['CLASSIFICATION']
+        
+        try:
+            ddb_prompt_entry: BedrockPromptConfig = BedrockPromptConfig.get(ddb_key)
+        except DoesNotExist:
+            raise ValueError(f"no DynamoDB item with key: {ddb_key} was found")
+        extraction_prompt_template = ddb_prompt_entry.prompt_template
+        
+        extraction_message_config = [
+            {"role": "user", 
+             "content": [
+                 {"type": "image","source": { "type": "base64","media_type": "image/jpeg","data": document_image}},
+                 {"type": "text", "text": extraction_prompt_template}
+             ]}
+        ]
+        
+        extraction_response = generate_message(
+            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, messages=extraction_message_config, max_tokens=512, temp=0.5, top_p=0.9
+        )
+        
+        if "completion" in extraction_response:
+            extraction_output_text = extraction_response['completion']
+        elif "content" in extraction_response:
+            extraction_output_text = extraction_response['content'][0]['text']
+            logger.debug(extraction_output_text)
+        else:
+            extraction_output_text = ""
+
+        logger.debug(extraction_response)
 
         s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
         output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".json"
         s3.put_object(Body=bytes(
-            output_text.encode('UTF-8')),
+            extraction_output_text.encode('UTF-8')),
                     Bucket=s3_output_bucket,
                     Key=output_bucket_key)
 

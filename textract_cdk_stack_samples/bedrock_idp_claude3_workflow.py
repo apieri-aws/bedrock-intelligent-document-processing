@@ -299,63 +299,81 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Function to add results from Bedrock classification into the step function context
-        bedrock_idp_classification_context_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
-            self,
-            "BedrockIDPClassificationContextFunction",
-            code=lambda_.DockerImageCode.from_image_asset(
-                os.path.join(script_location, "../lambda/bedrock_print_content")
-            ),
-            memory_size=128,
-            timeout=Duration.seconds(900),
-            architecture=lambda_.Architecture.X86_64,
-            environment={
-                "LOG_LEVEL": "DEBUG",
-            },
-        )
+        # bedrock_idp_classification_context_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+        #     self,
+        #     "BedrockIDPClassificationContextFunction",
+        #     code=lambda_.DockerImageCode.from_image_asset(
+        #         os.path.join(script_location, "../lambda/bedrock_print_content")
+        #     ),
+        #     memory_size=128,
+        #     timeout=Duration.seconds(900),
+        #     architecture=lambda_.Architecture.X86_64,
+        #     environment={
+        #         "LOG_LEVEL": "DEBUG",
+        #     },
+        # )
 
-        bedrock_idp_classification_context_task = tasks.LambdaInvoke(
-            self,
-            "BedrockIDPClassificationContextTask",
-            lambda_function=bedrock_idp_classification_context_function,
-            output_path="$.Payload",
-        )
+        # bedrock_idp_classification_context_task = tasks.LambdaInvoke(
+        #     self,
+        #     "BedrockIDPClassificationContextTask",
+        #     lambda_function=bedrock_idp_classification_context_function,
+        #     output_path="$.Payload",
+        # )
 
         # Grant classification context function permissions to DynamoDB table
-        document_bucket.grant_read_write(bedrock_idp_classification_context_function)
+        # document_bucket.grant_read_write(bedrock_idp_classification_context_function)
 
         # Creating the StepFunction workflow
         # Determine if the input file is a supported image type for Claude 3
-        is_supported_image_type = sfn.Condition.or_(
-            sfn.Condition.string_equals("$.mime", "image/jpeg"),
-            sfn.Condition.string_equals("$.mime", "image/png"),
-        )
+        # is_supported_image_type = sfn.Condition.or_(
+        #     sfn.Condition.string_equals("$.mime", "image/jpeg"),
+        #     sfn.Condition.string_equals("$.mime", "image/png"),
+        # )
         
-        is_supported_image_choice = (
-            sfn.Choice(self, "IsSupportedImage")
-            .when(is_supported_image_type, bedrock_idp_validity_check)
-            .otherwise(sfn.Pass(self, "Not supported image type"))
-        )
+        # is_supported_image_choice = (
+        #     sfn.Choice(self, "IsSupportedImage")
+        #     .when(is_supported_image_type, bedrock_idp_validity_check)
+        #     .otherwise(sfn.Pass(self, "Not supported image type"))
+        # )
         
         # Route StepFunction based on Bedrock classification
-        bedrock_idp_extraction_parallel = (
-            sfn.Parallel(self, "parallel_extraction")
-            .branch(bedrock_idp_extraction_task)
-            .branch(is_supported_image_choice)
-        )
+        # bedrock_idp_extraction_parallel = (
+        #     sfn.Parallel(self, "parallel_extraction")
+        #     .branch(bedrock_idp_extraction_task)
+        #     .branch(is_supported_image_choice)
+        # )
         
+        # doc_type_choice = (
+        #     sfn.Choice(self, "RouteDocType")
+        #     .when(
+        #         sfn.Condition.string_equals("$.classification.documentType", "BANK_STATEMENT"),
+        #         bedrock_idp_extraction_parallel
+        #     )
+        #     .when(
+        #         sfn.Condition.string_equals("$.classification.documentType", "BIRTH_CERTIFICATE"),
+        #         bedrock_idp_extraction_parallel
+        #     )            
+        #     .when(
+        #         sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
+        #         bedrock_idp_extraction_parallel
+        #     )
+        #     .otherwise(sfn.Pass(self, "No processing"))
+        # )
+        
+        # Determine if the document classification is supported
         doc_type_choice = (
             sfn.Choice(self, "RouteDocType")
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "BANK_STATEMENT"),
-                bedrock_idp_extraction_parallel
+                bedrock_idp_extraction_task
             )
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "BIRTH_CERTIFICATE"),
-                bedrock_idp_extraction_parallel
+                bedrock_idp_extraction_task
             )            
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
-                bedrock_idp_extraction_parallel
+                bedrock_idp_extraction_task
             )
             .otherwise(sfn.Pass(self, "No processing"))
         )
@@ -400,10 +418,26 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         map.iterator(textract_sync_task)
+        
+        # Determine if file is an image or pdf
+        is_supported_image_type = sfn.Condition.or_(
+            sfn.Condition.string_equals("$.mime", "image/jpeg"),
+            sfn.Condition.string_equals("$.mime", "image/png"),
+        )
+        
+        doc_chain = (
+            sfn.Chain.start(document_splitter_task).next(map)    
+        )
+        
+        doc_image_router = (
+            sfn.Choice(self, "RouteDocsAndImages")
+            .when(is_supported_image_type, bedrock_idp_validity_check)
+            .otherwise(doc_chain)
+        )
 
         # Define workflow chain before map state
         workflow_chain = (
-            sfn.Chain.start(decider_task).next(document_splitter_task).next(map)
+            sfn.Chain.start(decider_task).next(doc_image_router)
         )
 
         # GENERIC
