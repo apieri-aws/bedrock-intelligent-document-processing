@@ -128,7 +128,7 @@ def lambda_handler(event, _):
             raise ValueError(f"no DynamoDB item with key: '{ddb_key}' was found")
         prompt_template = ddb_prompt_entry.prompt_template
 
-        # load text document from S3
+        # Load text document from S3
         if (
             "txt_output_location" in event
             and "TextractOutputCSVPath" in event["txt_output_location"]
@@ -140,7 +140,8 @@ def lambda_handler(event, _):
             )
 
         document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
-        # apply template
+        
+        # Apply template
         jinja_template = jinja2.Template(prompt_template)
         template_vars = {
             "document_text": document_text
@@ -167,6 +168,13 @@ def lambda_handler(event, _):
 
         logger.debug(response)
 
+        # If our task is classification, add the document classification to the sfn context
+        if ddb_key == "CLASSIFICATION":
+            classification_json = json.loads(output_text)
+            document_type = classification_json['CLASSIFICATION']
+            event.setdefault('classification', {})['documentType'] = document_type
+        
+        # Write the document classification to S3
         s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
         output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".json"
         s3.put_object(Body=bytes(

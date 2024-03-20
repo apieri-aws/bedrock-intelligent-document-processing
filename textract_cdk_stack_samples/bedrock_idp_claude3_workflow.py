@@ -368,7 +368,7 @@ class BedrockIDPClaude3Workflow(Stack):
         bedrock_chain = (
             sfn.Chain.start(generate_text)
             .next(bedrock_idp_classification_task)
-            .next(bedrock_idp_classification_context_task)
+            # .next(bedrock_idp_classification_context_task)
             .next(doc_type_choice)
         )
 
