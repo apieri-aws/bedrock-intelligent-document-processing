@@ -29,11 +29,8 @@ class BedrockIDPClaude3Workflow(Stack):
         s3_upload_prefix = "uploads"
         s3_output_prefix = "textract-output"
         s3_csv_output_prefix = "csv-output"
-        # s3_opensearch_output_prefix = "textract-opensearch-output"
-        # s3_temp_output_prefix = "textract-temp"
         s3_split_document_prefix = "textract-split-documents"
         s3_txt_output_prefix = "textract-text-output"
-        # s3_comprehend_output_prefix = "comprehend-output"
         s3_bedrock_classification_output_prefix = 'bedrock-classification-output'
         s3_bedrock_extraction_output_prefix = 'bedrock-extraction-output'
 
@@ -176,11 +173,12 @@ class BedrockIDPClaude3Workflow(Stack):
         # number of pages
         decider_task = tcdk.TextractPOCDecider(
             self,
-            f"{workflow_name}-Decider",
+            "DocTypeDecider",
             textract_decider_max_retries=10000,
             s3_input_bucket=document_bucket.bucket_name,
             s3_input_prefix=s3_upload_prefix,
         )
+        
         # The splitter takes a document and splits into the max_number_of_pages_per_document
         # This is particulary useful when working with documents that exceed the Textract limits
         # or when the workflow requires per page processing
@@ -218,7 +216,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # Generates CSV data based on Texctract features defined in manifest file in ../lambda/start_with_all_features
         generate_csv = tcdk.TextractGenerateCSV(
             self,
-            "GenerateCsvTask",
+            "GenerateFormsTables",
             csv_s3_output_bucket=document_bucket.bucket_name,
             csv_s3_output_prefix=s3_csv_output_prefix,
             s3_input_bucket=document_bucket.bucket_name,
@@ -256,9 +254,9 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Bedrock classification
-        bedrock_idp_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+        bedrock_doc_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
-            "BedrockIDPClassificationFunction",
+            "BedrockDocClassificationFunction",
             code=lambda_.DockerImageCode.from_image_asset(
                 os.path.join(script_location, "../lambda/bedrock")
             ),
@@ -275,9 +273,9 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Grant classification function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_idp_classification_function)
-        document_bucket.grant_read_write(bedrock_idp_classification_function)
-        bedrock_idp_classification_function.add_to_role_policy(
+        bedrock_table.grant_read_data(bedrock_doc_classification_function)
+        document_bucket.grant_read_write(bedrock_doc_classification_function)
+        bedrock_doc_classification_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=["*"],
@@ -287,8 +285,8 @@ class BedrockIDPClaude3Workflow(Stack):
         # Create Bedrock classification task
         bedrock_idp_classification_task = tasks.LambdaInvoke(
             self,
-            "BedrockIDPClassificationTask",
-            lambda_function=bedrock_idp_classification_function,
+            "BedrockDocClassification",
+            lambda_function=bedrock_doc_classification_function,
             output_path="$.Payload",
         )
 
@@ -304,7 +302,7 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Create Bedrock extraction function
-        bedrock_idp_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+        bedrock_doc_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
             "BedrockIDPExtractionFunction",
             code=lambda_.DockerImageCode.from_image_asset(
@@ -322,9 +320,9 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Grant extraction function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_idp_extraction_function)
-        document_bucket.grant_read_write(bedrock_idp_extraction_function)
-        bedrock_idp_extraction_function.add_to_role_policy(
+        bedrock_table.grant_read_data(bedrock_doc_extraction_function)
+        document_bucket.grant_read_write(bedrock_doc_extraction_function)
+        bedrock_doc_extraction_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=["*"],
@@ -334,8 +332,8 @@ class BedrockIDPClaude3Workflow(Stack):
         # Create extraction task
         bedrock_idp_extraction_task = tasks.LambdaInvoke(
             self,
-            "BedrockIDPExtractionTask",
-            lambda_function=bedrock_idp_extraction_function,
+            "BedrockDocExtraction",
+            lambda_function=bedrock_doc_extraction_function,
             output_path="$.Payload",
         )
 
@@ -351,9 +349,9 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         
         # Create function for Bedrock image classification
-        bedrock_idp_image_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+        bedrock_image_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
-            "BedrockIDPImageClassificationFunction",
+            "BedrockImageClassificationFunction",
             code=lambda_.DockerImageCode.from_image_asset(
                 os.path.join(script_location, "../lambda/bedrock_image")
             ),
@@ -370,9 +368,9 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Grant image classification function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_idp_image_classification_function)
-        document_bucket.grant_read_write(bedrock_idp_image_classification_function)
-        bedrock_idp_image_classification_function.add_to_role_policy(
+        bedrock_table.grant_read_data(bedrock_image_classification_function)
+        document_bucket.grant_read_write(bedrock_image_classification_function)
+        bedrock_image_classification_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=["*"],
@@ -380,14 +378,14 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Create image classification task
-        bedrock_idp_image_classification_task = tasks.LambdaInvoke(
+        bedrock_image_classification_task = tasks.LambdaInvoke(
             self,
-            "BedrockIDPImageClassification",
-            lambda_function=bedrock_idp_image_classification_function,
+            "BedrockImageClassification",
+            lambda_function=bedrock_image_classification_function,
             output_path="$.Payload",
         )
 
-        bedrock_idp_image_classification_task.add_retry(
+        bedrock_image_classification_task.add_retry(
             max_attempts=10,
             errors=[
                 "Lambda.TooManyRequestsException",
@@ -401,7 +399,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # Create function for Bedrock image extraction
         bedrock_image_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
-            "BedrockIDPImageExtractionFunction",
+            "BedrockImageExtractionFunction",
             code=lambda_.DockerImageCode.from_image_asset(
                 os.path.join(script_location, "../lambda/bedrock_image")
             ),
@@ -427,14 +425,14 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         # Create image classification task
-        bedrock_idp_image_extraction_task = tasks.LambdaInvoke(
+        bedrock_image_extraction_task = tasks.LambdaInvoke(
             self,
-            "BedrockIDPImageExtraction",
+            "BedrockImageExtraction",
             lambda_function=bedrock_image_extraction_function,
             output_path="$.Payload",
         )
 
-        bedrock_idp_image_extraction_task.add_retry(
+        bedrock_image_extraction_task.add_retry(
             max_attempts=10,
             errors=[
                 "Lambda.TooManyRequestsException",
@@ -518,21 +516,21 @@ class BedrockIDPClaude3Workflow(Stack):
             sfn.Choice(self, "RouteImageType")
             .when(
                 sfn.Condition.string_equals("$.classification.imageType", "BANK_STATEMENT"),
-                bedrock_idp_image_extraction_task
+                bedrock_image_extraction_task
             )
             .when(
                 sfn.Condition.string_equals("$.classification.imageType", "BIRTH_CERTIFICATE"),
-                bedrock_idp_image_extraction_task
+                bedrock_image_extraction_task
             )            
             .when(
                 sfn.Condition.string_equals("$.classification.imageType", "PAYSTUB"),
-                bedrock_idp_image_extraction_task
+                bedrock_image_extraction_task
             )
             .otherwise(sfn.Pass(self, "No supported image classification"))
         )
         
         image_chain = (
-            sfn.Chain.start(bedrock_idp_image_classification_task).next(image_type_router)  
+            sfn.Chain.start(bedrock_image_classification_task).next(image_type_router)  
         )
         
         # Determine if image classification is supported
