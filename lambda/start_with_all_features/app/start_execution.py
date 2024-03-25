@@ -60,6 +60,7 @@ def lambda_handler(event, _):
             manifest.textract_features = [
                 "FORMS", "TABLES"
             ]
+            manifest.classification = "unclassified"
             # manifest.textract_features = [
             #     "QUERIES", "FORMS", "SIGNATURES", "TABLES"
             # ]            

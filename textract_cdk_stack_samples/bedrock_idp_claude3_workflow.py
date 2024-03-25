@@ -8,6 +8,7 @@ import aws_cdk.aws_lambda as lambda_
 import aws_cdk.aws_lambda_event_sources as eventsources
 import aws_cdk.aws_iam as iam
 import aws_cdk.aws_dynamodb as ddb
+import aws_cdk.custom_resources as cr
 import amazon_textract_idp_cdk_constructs as tcdk
 import cdk_nag as nag
 from aws_cdk import CfnOutput, RemovalPolicy, Stack, Duration, Aws, Fn, Aspects
@@ -57,11 +58,118 @@ class BedrockIDPClaude3Workflow(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
         )
         s3_output_bucket = document_bucket.bucket_name
+        
         # get the event source that will be used later to trigger the executions
         s3_event_source = eventsources.S3EventSource(
             document_bucket,
             events=[s3.EventType.OBJECT_CREATED],
             filters=[s3.NotificationKeyFilter(prefix=s3_upload_prefix)],
+        )
+        
+        # DynamoDB table for Bedrock configuration
+        bedrock_table = ddb.Table(
+            self,
+            "BedrockPromptConfig",
+            partition_key=ddb.Attribute(name="id", type=ddb.AttributeType.STRING),
+            removal_policy=RemovalPolicy.DESTROY,  # Only for dev/test environments
+            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,  # Use on-demand billing mode
+        )
+        
+        """
+        This is a CDK custom resource used as an abstraction layer to make simple AWS API calls. 
+        The resources uses the DynamoDB BatchWriteItem operation to insert initial prompts into our DynamoDB table for Bedrock to consume. 
+        Updating the prompts in the DynamoDB table requires a separate API call
+        """
+        aws_custom = cr.AwsCustomResource(self, "aws-custom",
+            on_create=cr.AwsSdkCall(
+                service="DynamoDB",
+                action="batchWriteItem",
+                parameters={
+                    "RequestItems": {
+                        bedrock_table.table_name: [
+                            {
+                                'PutRequest': {
+                                    'Item': {
+                                        'id': {
+                                            'S': 'CLASSIFICATION',
+                                        },
+                                        'p': {
+                                            'S': 'Given the following document text <text>{{document_text}}</text>, give the document one of the following classifications: {"PAYSTUB": a paystub, "BANK_STATEMENT": a bank statement, "BIRTH_CERTIFICATE": a birth certificate, "OTHER": something else} return only a JSON in the following format {"CLASSIFCIATION": result} and do not output any other text than the JSON.',
+                                        },
+                                        'v': {
+                                            'S': 'Give the document one of the following classifications: {"PAYSTUB": a paystub, "BANK_STATEMENT": a bank statement, "BIRTH_CERTIFICATE": a birth certificate, "OTHER": something else} return only a JSON in the following format {"CLASSIFCIATION": result} and do not output any other text than the JSON.'
+                                        }
+                                    },
+                                },
+                            },
+                            {
+                                'PutRequest': {
+                                    'Item': {
+                                        'id': {
+                                            'S': 'BANK_STATEMENT',
+                                        },
+                                        'p': {
+                                            'S': 'Given the following document text <text>{{document_text}}</text>, as a information extraction process, export the transaction table in CSV from format with the column names "date" in the format "YYYY-MM-DD", "description", "credit", "debit". Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out "Here is the extracted CSV data from the bank statement document" and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes. ',
+                                        },
+                                    },
+                                },
+                            },
+                            {
+                                'PutRequest': {
+                                    'Item': {
+                                        'id': {
+                                            'S': 'BIRTH_CERTIFICATE',
+                                        },
+                                        'p': {
+                                            'S': 'Given this birth certificate <text>{{document_text}}</text> extract the relevant information for validating the identity of the person. Export the information in JSON format. Only export the JSON information and no explaining text. Put all values in double quotes.',
+                                        },
+                                        'v': {
+                                            'S': 'Answer the following questions as "Yes" or "No". If the answer is "No" then include detailed justification in the answer: Is this document signed? Is this document notarized? Is there a seal on this document? Does this document look legitimate? Is the name on this document "Alex Pieri"? Export the information in JSON format. Only export the JSON information and no explaining text.'
+                                        }
+                                    },
+                                },
+                            },
+                            {
+                                'PutRequest': {
+                                    'Item': {
+                                        'id': {
+                                            'S': 'PAYSTUB',
+                                        },
+                                        'p': {
+                                            'S': 'Given the following document text <text>{{document_text}}</text>, as an information extraction process, what is the ytd gross pay for the following document. Only use information from the document and only JSON in the form of {"YTD_GROSS_PAY": value}',
+                                        },
+                                        'v': {
+                                            'S': 'Test3'
+                                        },
+                                        'test': {
+                                            'S': 'Test25'
+                                        }
+                                    },
+                                },
+                            },
+                            {
+                                'PutRequest': {
+                                    'Item': {
+                                        'id': {
+                                            'S': 'AWS_DOCUMENTATION',
+                                        },
+                                        'p': {
+                                            'S': 'Given the following document text <text>{{document_text}}</text>, as an information extraction process, what is the title of the doc?',
+                                        },
+                                        'v': {
+                                            'S': 'Test'
+                                        }
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                },
+                physical_resource_id=cr.PhysicalResourceId.of(bedrock_table.table_arn)
+            ),
+            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+                resources=cr.AwsCustomResourcePolicy.ANY_RESOURCE
+            )
         )
 
         # the decider checks if the document is of valid format and gets the
@@ -145,15 +253,6 @@ class BedrockIDPClaude3Workflow(Stack):
                 }
             ),
             result_path="$.txt_output_location",
-        )
-
-        # DynamoDB table for Bedrock configuration
-        bedrock_table = ddb.Table(
-            self,
-            "BedrockPromptConfig",
-            partition_key=ddb.Attribute(name="id", type=ddb.AttributeType.STRING),
-            removal_policy=RemovalPolicy.DESTROY,  # Only for dev/test environments
-            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,  # Use on-demand billing mode
         )
 
         # Bedrock classification
@@ -251,12 +350,60 @@ class BedrockIDPClaude3Workflow(Stack):
             ],
         )
         
-        # Create function for Bedrock validity check
-        bedrock_idp_validity_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+        # Create function for Bedrock image classification
+        bedrock_idp_image_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
-            "BedrockIDPValidityFunction",
+            "BedrockIDPImageClassificationFunction",
             code=lambda_.DockerImageCode.from_image_asset(
-                os.path.join(script_location, "../lambda/bedrock_document_validity")
+                os.path.join(script_location, "../lambda/bedrock_image")
+            ),
+            memory_size=512,
+            timeout=Duration.seconds(900),
+            architecture=lambda_.Architecture.X86_64,
+            environment={
+                "LOG_LEVEL": "DEBUG",
+                "FIXED_KEY": "CLASSIFICATION",
+                "BEDROCK_CONFIGURATION_TABLE": bedrock_table.table_name,
+                "S3_OUTPUT_PREFIX": s3_bedrock_classification_output_prefix,
+                "S3_OUTPUT_BUCKET": document_bucket.bucket_name
+            },
+        )
+
+        # Grant image classification function permissions to DynamoDB table and Bedrock
+        bedrock_table.grant_read_data(bedrock_idp_image_classification_function)
+        document_bucket.grant_read_write(bedrock_idp_image_classification_function)
+        bedrock_idp_image_classification_function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["bedrock:InvokeModel"],
+                resources=["*"],
+            )
+        )
+
+        # Create image classification task
+        bedrock_idp_image_classification_task = tasks.LambdaInvoke(
+            self,
+            "BedrockIDPImageClassification",
+            lambda_function=bedrock_idp_image_classification_function,
+            output_path="$.Payload",
+        )
+
+        bedrock_idp_image_classification_task.add_retry(
+            max_attempts=10,
+            errors=[
+                "Lambda.TooManyRequestsException",
+                "ModelNotReadyException",
+                "ModelTimeoutException",
+                "ServiceQuotaExceededException",
+                "ThrottlingException",
+            ],
+        )
+        
+        # Create function for Bedrock image extraction
+        bedrock_image_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+            self,
+            "BedrockIDPImageExtractionFunction",
+            code=lambda_.DockerImageCode.from_image_asset(
+                os.path.join(script_location, "../lambda/bedrock_image")
             ),
             memory_size=512,
             timeout=Duration.seconds(900),
@@ -269,25 +416,25 @@ class BedrockIDPClaude3Workflow(Stack):
             },
         )
 
-        # Grant extraction function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_idp_validity_function)
-        document_bucket.grant_read_write(bedrock_idp_validity_function)
-        bedrock_idp_validity_function.add_to_role_policy(
+        # Grant image classification function permissions to DynamoDB table and Bedrock
+        bedrock_table.grant_read_data(bedrock_image_extraction_function)
+        document_bucket.grant_read_write(bedrock_image_extraction_function)
+        bedrock_image_extraction_function.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock:InvokeModel"],
                 resources=["*"],
             )
         )
 
-        # Create validity check task
-        bedrock_idp_validity_check = tasks.LambdaInvoke(
+        # Create image classification task
+        bedrock_idp_image_extraction_task = tasks.LambdaInvoke(
             self,
-            "BedrockIDPValidityCheck",
-            lambda_function=bedrock_idp_validity_function,
+            "BedrockIDPImageExtraction",
+            lambda_function=bedrock_image_extraction_function,
             output_path="$.Payload",
         )
 
-        bedrock_idp_validity_check.add_retry(
+        bedrock_idp_image_extraction_task.add_retry(
             max_attempts=10,
             errors=[
                 "Lambda.TooManyRequestsException",
@@ -297,68 +444,6 @@ class BedrockIDPClaude3Workflow(Stack):
                 "ThrottlingException",
             ],
         )
-
-        # Function to add results from Bedrock classification into the step function context
-        # bedrock_idp_classification_context_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
-        #     self,
-        #     "BedrockIDPClassificationContextFunction",
-        #     code=lambda_.DockerImageCode.from_image_asset(
-        #         os.path.join(script_location, "../lambda/bedrock_print_content")
-        #     ),
-        #     memory_size=128,
-        #     timeout=Duration.seconds(900),
-        #     architecture=lambda_.Architecture.X86_64,
-        #     environment={
-        #         "LOG_LEVEL": "DEBUG",
-        #     },
-        # )
-
-        # bedrock_idp_classification_context_task = tasks.LambdaInvoke(
-        #     self,
-        #     "BedrockIDPClassificationContextTask",
-        #     lambda_function=bedrock_idp_classification_context_function,
-        #     output_path="$.Payload",
-        # )
-
-        # Grant classification context function permissions to DynamoDB table
-        # document_bucket.grant_read_write(bedrock_idp_classification_context_function)
-
-        # Creating the StepFunction workflow
-        # Determine if the input file is a supported image type for Claude 3
-        # is_supported_image_type = sfn.Condition.or_(
-        #     sfn.Condition.string_equals("$.mime", "image/jpeg"),
-        #     sfn.Condition.string_equals("$.mime", "image/png"),
-        # )
-        
-        # is_supported_image_choice = (
-        #     sfn.Choice(self, "IsSupportedImage")
-        #     .when(is_supported_image_type, bedrock_idp_validity_check)
-        #     .otherwise(sfn.Pass(self, "Not supported image type"))
-        # )
-        
-        # Route StepFunction based on Bedrock classification
-        # bedrock_idp_extraction_parallel = (
-        #     sfn.Parallel(self, "parallel_extraction")
-        #     .branch(bedrock_idp_extraction_task)
-        #     .branch(is_supported_image_choice)
-        # )
-        
-        # doc_type_choice = (
-        #     sfn.Choice(self, "RouteDocType")
-        #     .when(
-        #         sfn.Condition.string_equals("$.classification.documentType", "BANK_STATEMENT"),
-        #         bedrock_idp_extraction_parallel
-        #     )
-        #     .when(
-        #         sfn.Condition.string_equals("$.classification.documentType", "BIRTH_CERTIFICATE"),
-        #         bedrock_idp_extraction_parallel
-        #     )            
-        #     .when(
-        #         sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
-        #         bedrock_idp_extraction_parallel
-        #     )
-        #     .otherwise(sfn.Pass(self, "No processing"))
-        # )
         
         # Determine if the document classification is supported
         doc_type_choice = (
@@ -375,7 +460,7 @@ class BedrockIDPClaude3Workflow(Stack):
                 sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
                 bedrock_idp_extraction_task
             )
-            .otherwise(sfn.Pass(self, "No processing"))
+            .otherwise(sfn.Pass(self, "No supported document classification"))
         )
         
         # Create chains for parallel_tasks
@@ -429,9 +514,31 @@ class BedrockIDPClaude3Workflow(Stack):
             sfn.Chain.start(document_splitter_task).next(map)    
         )
         
+        image_type_router = (
+            sfn.Choice(self, "RouteImageType")
+            .when(
+                sfn.Condition.string_equals("$.classification.imageType", "BANK_STATEMENT"),
+                bedrock_idp_image_extraction_task
+            )
+            .when(
+                sfn.Condition.string_equals("$.classification.imageType", "BIRTH_CERTIFICATE"),
+                bedrock_idp_image_extraction_task
+            )            
+            .when(
+                sfn.Condition.string_equals("$.classification.imageType", "PAYSTUB"),
+                bedrock_idp_image_extraction_task
+            )
+            .otherwise(sfn.Pass(self, "No supported image classification"))
+        )
+        
+        image_chain = (
+            sfn.Chain.start(bedrock_idp_image_classification_task).next(image_type_router)  
+        )
+        
+        # Determine if image classification is supported
         doc_image_router = (
             sfn.Choice(self, "RouteDocsAndImages")
-            .when(is_supported_image_type, bedrock_idp_validity_check)
+            .when(is_supported_image_type, image_chain)
             .otherwise(doc_chain)
         )
 
