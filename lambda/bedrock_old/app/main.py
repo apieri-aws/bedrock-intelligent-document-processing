@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 version = "0.0.1"
 s3 = boto3.client("s3")
-ssm = boto3.client('ssm')
 bedrock_rt = boto3.client("bedrock-runtime",region_name="us-east-1")
 
 
@@ -57,15 +56,20 @@ class ModelNotReadyException(Exception):
     pass
 
 
-def get_ssm_paramter(path):
-    return ssm.get_parameter(Name=path, WithDecryption=True)
+class BedrockPromptConfig(Model):
+    class Meta:
+        table_name = os.environ["BEDROCK_CONFIGURATION_TABLE"]
+        region = boto3.Session().region_name
 
-def generate_message(bedrock_runtime, model_id, system, messages, max_tokens,top_p, temp):
+    id = UnicodeAttribute(hash_key=True, attr_name="id")
+    prompt_template = UnicodeAttribute(attr_name="p")
+
+def generate_message(bedrock_runtime, model_id, messages, max_tokens,top_p, temp):
+
     body=json.dumps(
         {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": max_tokens,
-            "system": system,
             "messages": messages,
             "temperature": temp,
             "top_p": top_p,
@@ -107,35 +111,23 @@ def lambda_handler(event, _):
 
         # fixed_key for classification and non fixed key for extraction
         if fixed_key:
-            parameter_name = fixed_key
+            ddb_key = fixed_key
         else:
             if "classification" in event and "documentType" in event["classification"]:
-                parameter_name = event["classification"]["documentType"]
-                logger.debug(f"document_type: {parameter_name}")
+                ddb_key = event["classification"]["documentType"]
+                logger.debug(f"document_type: {ddb_key}")
             else:
                 raise ValueError(
                     f"no [classification][documentType] given in event: {event}"
                 )
-                
-        parameter_path = f"/BedrockIDP/{parameter_name}"
-        
-        logger.debug(parameter_path)
-        
-        ssm_response = get_ssm_paramter(parameter_path)
 
-        # Load prompt from SSM
-        prompt = ""
-        
-        if (
-            "Parameter" in ssm_response
-            and "Value" in ssm_response["Parameter"]
-        ):
-            prompt = ssm_response["Parameter"]["Value"]
-        else:
-            raise ValueError(
-                "no ['Value'] in parameter store "
-            )
-            
+        # Load prompt from DDB
+        try:
+            ddb_prompt_entry: BedrockPromptConfig = BedrockPromptConfig.get(ddb_key)
+        except DoesNotExist:
+            raise ValueError(f"no DynamoDB item with key: '{ddb_key}' was found")
+        prompt_template = ddb_prompt_entry.prompt_template
+
         # Load text document from S3
         if (
             "txt_output_location" in event
@@ -149,14 +141,21 @@ def lambda_handler(event, _):
 
         document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
         
-        system_config = f"You are an AI assistant that performs document classification and extraction tasks. Given the following document <text>{{document_text}}</text>, answer the user's questions"
+        # Apply template
+        jinja_template = jinja2.Template(prompt_template)
+        template_vars = {
+            "document_text": document_text
+        }
+        prompt = jinja_template.render(template_vars)
+
+        logger.debug(prompt)
         
         message_config = [
             {"role": "user", "content": [{"type": "text", "text": prompt}]}
         ]
                 
         response = generate_message(
-            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, system=system_config, messages=message_config, max_tokens=512, temp=0.5, top_p=0.9
+            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, messages=message_config, max_tokens=512, temp=0.5, top_p=0.9
         )
         
         if "completion" in response:
@@ -170,7 +169,7 @@ def lambda_handler(event, _):
         logger.debug(response)
 
         # If our task is classification, add the document classification to the sfn context
-        if parameter_name == "CLASSIFICATION":
+        if ddb_key == "CLASSIFICATION":
             classification_json = json.loads(output_text)
             document_type = classification_json['CLASSIFICATION']
             event.setdefault('classification', {})['documentType'] = document_type
