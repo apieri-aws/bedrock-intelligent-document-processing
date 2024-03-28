@@ -16,7 +16,7 @@ from aws_cdk import aws_opensearchservice as opensearch
 import aws_cdk.aws_ssm as ssm
 
 
-class BedrockIDPClaude3Workflow(Stack):
+class Testing(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(
             scope,
@@ -388,11 +388,7 @@ class BedrockIDPClaude3Workflow(Stack):
                         $.documentSplitterS3OutputBucket, \
                         $.documentSplitterS3OutputPath, \
                         $$.Map.Item.Value)"
-                    ),
-                    "textractFeatures": [
-                      "FORMS",
-                      "TABLES"
-                    ]
+                    )
                 },
                 "mime": sfn.JsonPath.string_at("$.mime"),
                 "originFileURI": sfn.JsonPath.string_at("$.originFileURI"),
