@@ -78,7 +78,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # Decider checks if the document is of valid format and gets the number of pages
         decider_task = tcdk.TextractPOCDecider(
             self,
-            "DocTypeDecider",
+            "GetFileType",
             textract_decider_max_retries=10000,
             s3_input_bucket=document_bucket.bucket_name,
             s3_input_prefix=s3_upload_prefix,
@@ -88,7 +88,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # This is particulary useful when working with documents that exceed the Textract limits or when the workflow requires per page processing
         document_splitter_task = tcdk.DocumentSplitter(
             self,
-            "DocumentSplitter",
+            "DocSplitter",
             s3_output_bucket=s3_output_bucket,
             s3_output_prefix=s3_split_document_prefix,
             s3_input_bucket=document_bucket.bucket_name,
@@ -141,7 +141,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # Generate raw text based on Textract output from TextractSync
         generate_text = tcdk.TextractGenerateCSV(
             self,
-            "GenerateText",
+            "FormatTextractOutput",
             csv_s3_output_bucket=document_bucket.bucket_name,
             csv_s3_output_prefix=s3_txt_output_prefix,
             output_type="LINES",
