@@ -7,13 +7,13 @@ import aws_cdk.aws_stepfunctions_tasks as tasks
 import aws_cdk.aws_lambda as lambda_
 import aws_cdk.aws_lambda_event_sources as eventsources
 import aws_cdk.aws_iam as iam
-import aws_cdk.aws_dynamodb as ddb
 import aws_cdk.custom_resources as cr
 import amazon_textract_idp_cdk_constructs as tcdk
 import cdk_nag as nag
 from aws_cdk import CfnOutput, RemovalPolicy, Stack, Duration, Aws, Fn, Aspects
 from aws_solutions_constructs.aws_lambda_opensearch import LambdaToOpenSearch
 from aws_cdk import aws_opensearchservice as opensearch
+import aws_cdk.aws_ssm as ssm
 
 
 class BedrockIDPClaude3Workflow(Stack):
@@ -56,24 +56,26 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         s3_output_bucket = document_bucket.bucket_name
         
-        # get the event source that will be used later to trigger the executions
+        # Get the event source that will be used later to trigger the executions
         s3_event_source = eventsources.S3EventSource(
             document_bucket,
             events=[s3.EventType.OBJECT_CREATED],
             filters=[s3.NotificationKeyFilter(prefix=s3_upload_prefix)],
         )
         
-        # DynamoDB table for Bedrock configuration
-        bedrock_table = ddb.Table(
-            self,
-            "BedrockPromptConfig",
-            partition_key=ddb.Attribute(name="id", type=ddb.AttributeType.STRING),
-            removal_policy=RemovalPolicy.DESTROY,  # Only for dev/test environments
-            billing_mode=ddb.BillingMode.PAY_PER_REQUEST,  # Use on-demand billing mode
+        # Create Systems Manager parameters on initial deployment
+        birth_certificate_parameter = ssm.CfnParameter(self, "BirthCertificateParameter",
+            type="String",
+            value="Given the document, extract the relevant information for validating the identity of the person. Export the information in JSON format. Only export the JSON information and no explaining text. Put all values in double quotes. Added in"
+        )
+        
+        bank_statement_parameter = ssm.CfnParameter(self, "BankStatementParameter",
+            type="String",
+            name="/BedrockIDP/BANK_STATEMENT",
+            value="Given the document, as a information extraction process, export the transaction table in CSV from format with the column names 'date' in the format 'YYYY-MM-DD', 'description', 'withdrawls', 'deposits', 'balance'. Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out 'Here is the extracted CSV data from the bank statement document' and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes."
         )
 
-        # the decider checks if the document is of valid format and gets the
-        # number of pages
+        # Decider checks if the document is of valid format and gets the number of pages
         decider_task = tcdk.TextractPOCDecider(
             self,
             "DocTypeDecider",
@@ -83,8 +85,7 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         
         # The splitter takes a document and splits into the max_number_of_pages_per_document
-        # This is particulary useful when working with documents that exceed the Textract limits
-        # or when the workflow requires per page processing
+        # This is particulary useful when working with documents that exceed the Textract limits or when the workflow requires per page processing
         document_splitter_task = tcdk.DocumentSplitter(
             self,
             "DocumentSplitter",
@@ -97,7 +98,7 @@ class BedrockIDPClaude3Workflow(Stack):
             textract_document_splitter_max_retries=10000,
         )
 
-        # Call Textract sync
+        # Call Textract sync on document chain
         textract_sync_task = tcdk.TextractGenericSyncSfnTask(
             self,
             "TextractSync",
@@ -137,7 +138,7 @@ class BedrockIDPClaude3Workflow(Stack):
             }),
             result_path="$.csv_output_location")
 
-        # Text generation task for classification
+        # Generate raw text based on Textract output from TextractSync
         generate_text = tcdk.TextractGenerateCSV(
             self,
             "GenerateText",
@@ -156,7 +157,7 @@ class BedrockIDPClaude3Workflow(Stack):
             result_path="$.txt_output_location",
         )
 
-        # Bedrock classification
+        # Bedrock classification for document chain
         bedrock_doc_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
             "BedrockDocClassificationFunction",
@@ -169,14 +170,12 @@ class BedrockIDPClaude3Workflow(Stack):
             environment={
                 "LOG_LEVEL": "DEBUG",
                 "FIXED_KEY": "CLASSIFICATION",
-                "BEDROCK_CONFIGURATION_TABLE": bedrock_table.table_name,
                 "S3_OUTPUT_PREFIX": s3_bedrock_classification_output_prefix,
                 "S3_OUTPUT_BUCKET": document_bucket.bucket_name
             },
         )
 
-        # Grant classification function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_doc_classification_function)
+        # Grant classification function permissions to Systems Manager and Bedrock
         document_bucket.grant_read_write(bedrock_doc_classification_function)
         bedrock_doc_classification_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -185,15 +184,15 @@ class BedrockIDPClaude3Workflow(Stack):
             )
         )
 
-        # Create Bedrock classification task
-        bedrock_idp_classification_task = tasks.LambdaInvoke(
+        # Bedrock classification task for document chain
+        bedrock_doc_classification_task = tasks.LambdaInvoke(
             self,
             "BedrockDocClassification",
             lambda_function=bedrock_doc_classification_function,
             output_path="$.Payload",
         )
 
-        bedrock_idp_classification_task.add_retry(
+        bedrock_doc_classification_task.add_retry(
             max_attempts=10,
             errors=[
                 "Lambda.TooManyRequestsException",
@@ -204,10 +203,10 @@ class BedrockIDPClaude3Workflow(Stack):
             ],
         )
 
-        # Create Bedrock extraction function
+        # Create Bedrock extraction function for document chain
         bedrock_doc_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
-            "BedrockIDPExtractionFunction",
+            "BedrockDocExtractionFunction",
             code=lambda_.DockerImageCode.from_image_asset(
                 os.path.join(script_location, "../lambda/bedrock")
             ),
@@ -216,14 +215,12 @@ class BedrockIDPClaude3Workflow(Stack):
             architecture=lambda_.Architecture.X86_64,
             environment={
                 "LOG_LEVEL": "DEBUG",
-                "BEDROCK_CONFIGURATION_TABLE": bedrock_table.table_name,
                 "S3_OUTPUT_PREFIX": s3_bedrock_extraction_output_prefix,
                 "S3_OUTPUT_BUCKET": document_bucket.bucket_name
             },
         )
 
-        # Grant extraction function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_doc_extraction_function)
+        # Grant extraction function permissions to Systems Manager and Bedrock
         document_bucket.grant_read_write(bedrock_doc_extraction_function)
         bedrock_doc_extraction_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -232,15 +229,15 @@ class BedrockIDPClaude3Workflow(Stack):
             )
         )
 
-        # Create extraction task
-        bedrock_idp_extraction_task = tasks.LambdaInvoke(
+        # Bedrock extraction task for document chain
+        bedrock_doc_extraction_task = tasks.LambdaInvoke(
             self,
             "BedrockDocExtraction",
             lambda_function=bedrock_doc_extraction_function,
             output_path="$.Payload",
         )
 
-        bedrock_idp_extraction_task.add_retry(
+        bedrock_doc_extraction_task.add_retry(
             max_attempts=10,
             errors=[
                 "Lambda.TooManyRequestsException",
@@ -251,7 +248,7 @@ class BedrockIDPClaude3Workflow(Stack):
             ],
         )
         
-        # Create function for Bedrock image classification
+        # Bedrock image classification function
         bedrock_image_classification_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
             "BedrockImageClassificationFunction",
@@ -264,14 +261,12 @@ class BedrockIDPClaude3Workflow(Stack):
             environment={
                 "LOG_LEVEL": "DEBUG",
                 "FIXED_KEY": "CLASSIFICATION",
-                "BEDROCK_CONFIGURATION_TABLE": bedrock_table.table_name,
                 "S3_OUTPUT_PREFIX": s3_bedrock_classification_output_prefix,
                 "S3_OUTPUT_BUCKET": document_bucket.bucket_name
             },
         )
 
-        # Grant image classification function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_image_classification_function)
+        # Grant image classification function permissions to Systems Manager and Bedrock
         document_bucket.grant_read_write(bedrock_image_classification_function)
         bedrock_image_classification_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -280,7 +275,7 @@ class BedrockIDPClaude3Workflow(Stack):
             )
         )
 
-        # Create image classification task
+        # Bedrock image classification task
         bedrock_image_classification_task = tasks.LambdaInvoke(
             self,
             "BedrockImageClassification",
@@ -299,7 +294,7 @@ class BedrockIDPClaude3Workflow(Stack):
             ],
         )
         
-        # Create function for Bedrock image extraction
+        # Bedrock image extraction function
         bedrock_image_extraction_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
             self,
             "BedrockImageExtractionFunction",
@@ -311,14 +306,12 @@ class BedrockIDPClaude3Workflow(Stack):
             architecture=lambda_.Architecture.X86_64,
             environment={
                 "LOG_LEVEL": "DEBUG",
-                "BEDROCK_CONFIGURATION_TABLE": bedrock_table.table_name,
                 "S3_OUTPUT_PREFIX": s3_bedrock_extraction_output_prefix,
                 "S3_OUTPUT_BUCKET": document_bucket.bucket_name
             },
         )
 
-        # Grant image classification function permissions to DynamoDB table and Bedrock
-        bedrock_table.grant_read_data(bedrock_image_extraction_function)
+        # Grant image classification function permissions to Systems Manager and Bedrock
         document_bucket.grant_read_write(bedrock_image_extraction_function)
         bedrock_image_extraction_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -327,7 +320,7 @@ class BedrockIDPClaude3Workflow(Stack):
             )
         )
 
-        # Create image classification task
+        # Bedrock image classification task
         bedrock_image_extraction_task = tasks.LambdaInvoke(
             self,
             "BedrockImageExtraction",
@@ -351,15 +344,15 @@ class BedrockIDPClaude3Workflow(Stack):
             sfn.Choice(self, "RouteDocType")
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "BANK_STATEMENT"),
-                bedrock_idp_extraction_task
+                bedrock_doc_extraction_task
             )
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "BIRTH_CERTIFICATE"),
-                bedrock_idp_extraction_task
+                bedrock_doc_extraction_task
             )            
             .when(
                 sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
-                bedrock_idp_extraction_task
+                bedrock_doc_extraction_task
             )
             .otherwise(sfn.Pass(self, "No supported document classification"))
         )
@@ -371,8 +364,7 @@ class BedrockIDPClaude3Workflow(Stack):
 
         bedrock_chain = (
             sfn.Chain.start(generate_text)
-            .next(bedrock_idp_classification_task)
-            # .next(bedrock_idp_classification_context_task)
+            .next(bedrock_doc_classification_task)
             .next(doc_type_choice)
         )
 
@@ -415,6 +407,7 @@ class BedrockIDPClaude3Workflow(Stack):
             sfn.Chain.start(document_splitter_task).next(map)    
         )
         
+        # Determine if image classification is supported
         image_type_router = (
             sfn.Choice(self, "RouteImageType")
             .when(
@@ -432,11 +425,12 @@ class BedrockIDPClaude3Workflow(Stack):
             .otherwise(sfn.Pass(self, "No supported image classification"))
         )
         
+        # Start image chain
         image_chain = (
             sfn.Chain.start(bedrock_image_classification_task).next(image_type_router)  
         )
         
-        # Determine if image classification is supported
+        # Route docs to doc chain, route images to image chain
         doc_image_router = (
             sfn.Choice(self, "RouteDocsAndImages")
             .when(is_supported_image_type, image_chain)
@@ -451,8 +445,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # GENERIC
         state_machine = sfn.StateMachine(self, workflow_name, definition=workflow_chain)
 
-        # The StartThrottle triggers based on event_source (in this case S3 OBJECT_CREATED)
-        # and handles all the complexity of making sure the limits or bottlenecks are not exceeded
+        # The StartThrottle triggers based on event_source (in this case S3 OBJECT_CREATED) and handles all the complexity of making sure the limits or bottlenecks are not exceeded
         sf_executions_start_throttle = tcdk.SFExecutionsStartThrottle(
             self,
             "ExecutionThrottle",
@@ -489,12 +482,6 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         CfnOutput(
             self,
-            "BedrockConfigurationTableName",
-            value=bedrock_table.table_name,
-            export_name=f"{Aws.STACK_NAME}-BedrockConfigurationTableName",
-        )
-        CfnOutput(
-            self,
             "StepFunctionFlowLink",
             value=f"https://{current_region}.console.aws.amazon.com/states/home?region={current_region}#/statemachines/view/{state_machine.state_machine_arn}",  # noqa: E501
         ),
@@ -502,11 +489,6 @@ class BedrockIDPClaude3Workflow(Stack):
             self,
             "DocumentQueueLink",
             value=f"https://{current_region}.console.aws.amazon.com/sqs/v2/home?region={current_region}#/queues/{queue_url_urlencoded}",  # noqa: E501
-        )
-        CfnOutput(
-            self,
-            "BedrockConfigurationTable",
-            value=f"https://{current_region}.console.aws.amazon.com/dynamodbv2/home?region={current_region}#tables:selected={bedrock_table.table_name}",  # noqa: E501
         )
 
         # # NAG suppressions

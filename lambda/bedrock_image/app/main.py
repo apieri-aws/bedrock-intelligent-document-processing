@@ -6,14 +6,10 @@ import logging
 import os
 import textractmanifest as tm
 import boto3
-import jinja2
 import base64
 from uuid import uuid4
 
 from typing import Tuple
-from pynamodb.models import Model
-from pynamodb.attributes import UnicodeAttribute
-from pynamodb.exceptions import DoesNotExist
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +78,6 @@ def generate_message(bedrock_runtime, model_id, system, messages, max_tokens,top
 
 def lambda_handler(event, _):
     """
-    Reads a jinja2 template from the DDB table passed in as BEDROCK_CONFIGURATION_TABLE
     if the FIXED_KEY is empty, it takes the classification result to find the prompt.
     if the FIXED_KEY is set, it will always execute that prompt, which is useful for classification
     """
@@ -94,11 +89,12 @@ def lambda_handler(event, _):
     fixed_key = os.environ.get("FIXED_KEY", None)
     s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET')
     s3_output_prefix = os.environ.get('S3_OUTPUT_PREFIX')
+    
     if not s3_output_bucket:
         raise Exception("no S3_OUTPUT_BUCKET set")
     if not s3_output_prefix:
         raise Exception("no S3_OUTPUT_PREFIX set")
-
+    # Get manifest file from event context
     try:
         if "Payload" in event and "manifest" in event["Payload"]:
             manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["Payload"]["manifest"])  # type: ignore
@@ -118,11 +114,9 @@ def lambda_handler(event, _):
                 raise ValueError(
                     f"no [classification][imageType] given in event: {event}"
                 )
-
+        
+        # Get SSM parameter path for prompt 
         parameter_path = f"/BedrockIDP/{parameter_name}"
-        
-        logger.debug(parameter_path)
-        
         ssm_response = get_ssm_paramter(parameter_path)
         
         # Load prompt from SSM
@@ -183,13 +177,13 @@ def lambda_handler(event, _):
 
         logger.debug(response)
         
+        # If our task was classification, add the image classification to the event context        
         if parameter_name == "CLASSIFICATION":
             classification_json = json.loads(output_text)
             image_type = classification_json['CLASSIFICATION']
             
             classification_dict = {"imageType": image_type}
             event['classification'] = classification_dict
-            # event.setdefault('classification', {})['imageType'] = image_type
 
         s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
         output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".json"

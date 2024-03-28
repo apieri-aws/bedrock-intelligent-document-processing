@@ -6,13 +6,9 @@ import logging
 import os
 import textractmanifest as tm
 import boto3
-import jinja2
 from uuid import uuid4
 
 from typing import Tuple
-from pynamodb.models import Model
-from pynamodb.attributes import UnicodeAttribute
-from pynamodb.exceptions import DoesNotExist
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +76,6 @@ def generate_message(bedrock_runtime, model_id, system, messages, max_tokens,top
 
 def lambda_handler(event, _):
     """
-    Reads a jinja2 template from the DDB table passed in as BEDROCK_CONFIGURATION_TABLE
     if the FIXED_KEY is empty, it takes the classification result to find the prompt.
     if the FIXED_KEY is set, it will always execute that prompt, which is useful for classification
     """
@@ -92,11 +87,12 @@ def lambda_handler(event, _):
     fixed_key = os.environ.get("FIXED_KEY", None)
     s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET')
     s3_output_prefix = os.environ.get('S3_OUTPUT_PREFIX')
+    
     if not s3_output_bucket:
         raise Exception("no S3_OUTPUT_BUCKET set")
     if not s3_output_prefix:
         raise Exception("no S3_OUTPUT_PREFIX set")
-
+    # Get manifest file from event context
     try:
         if "Payload" in event and "manifest" in event["Payload"]:
             manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["Payload"]["manifest"])  # type: ignore
@@ -117,10 +113,8 @@ def lambda_handler(event, _):
                     f"no [classification][documentType] given in event: {event}"
                 )
                 
+        # Get SSM parameter path for prompt        
         parameter_path = f"/BedrockIDP/{parameter_name}"
-        
-        logger.debug(parameter_path)
-        
         ssm_response = get_ssm_paramter(parameter_path)
 
         # Load prompt from SSM
@@ -149,7 +143,9 @@ def lambda_handler(event, _):
 
         document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
         
-        system_config = f"You are an AI assistant that performs document classification and extraction tasks. Given the following document <text>{{document_text}}</text>, answer the user's questions"
+        system_config = f"You are an AI assistant that performs document classification and extraction tasks. Given the following document <text>{{{document_text}}}</text>, answer the user's questions"
+        
+        logger.debug(system_config)
         
         message_config = [
             {"role": "user", "content": [{"type": "text", "text": prompt}]}
@@ -169,7 +165,7 @@ def lambda_handler(event, _):
 
         logger.debug(response)
 
-        # If our task is classification, add the document classification to the sfn context
+        # If our task is classification, add the document classification to the event context
         if parameter_name == "CLASSIFICATION":
             classification_json = json.loads(output_text)
             document_type = classification_json['CLASSIFICATION']
