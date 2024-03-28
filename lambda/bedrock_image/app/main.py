@@ -164,7 +164,7 @@ def lambda_handler(event, _):
         ]
         
         response = generate_message(
-            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, system=system_config, messages=message_config, max_tokens=512, temp=0.5, top_p=0.9
+            bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, system=system_config, messages=message_config, max_tokens=512, temp=0.2, top_p=0.9
         )
         
         if "completion" in response:
