@@ -7,9 +7,10 @@ import os
 import textractmanifest as tm
 import boto3
 from uuid import uuid4
+from io import BytesIO
 
 from typing import Tuple
-from pdf2image import convert_from_path
+from pdf2image import convert_from_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def split_s3_path_to_bucket_and_key(s3_path: str) -> Tuple[str, str]:
         )
 
 
-def get_file_from_s3(s3_path: str, range=None) -> bytes:
+def get_pdf_file_from_s3(s3_path: str, range=None) -> bytes:
     s3_bucket, s3_key = split_s3_path_to_bucket_and_key(s3_path)
     if range:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key, Range=range)
@@ -49,9 +50,6 @@ class ModelTimeoutException(Exception):
 class ModelNotReadyException(Exception):
     pass
 
-def convert_pdf_to_png(pdf_file):
-    image = convert_from_path(pdf_file)
-
 def lambda_handler(event, _):
     """
     Converts single page PDFs to PNGs
@@ -62,51 +60,31 @@ def lambda_handler(event, _):
     logger.info(json.dumps(event))
     bedrock_model_id = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-sonnet-20240229-v1:0")
     fixed_key = os.environ.get("FIXED_KEY", None)
-    s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET')
-    s3_output_prefix = os.environ.get('S3_OUTPUT_PREFIX')
-    if not s3_output_bucket:
-        raise Exception("no S3_OUTPUT_BUCKET set")
-    if not s3_output_prefix:
-        raise Exception("no S3_OUTPUT_PREFIX set")
 
-    try:
-        if "Payload" in event and "manifest" in event["Payload"]:
-            manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["Payload"]["manifest"])  # type: ignore
-        elif "manifest" in event:
-            manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["manifest"])  # type: ignore else:
-        else:
-            manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event)  # type: ignore
-            
-        # Load source image from S3
-        if (
-            "manifest" in event
-            and "s3Path" in event["manifest"]
-        ):
-            image_path = event["manifest"]["s3Path"]
-        else:
-            raise ValueError(
-                "no ['manifest']['s3Path'] to get the text file from "
-            )
+    if "Payload" in event and "manifest" in event["Payload"]:
+        manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["Payload"]["manifest"])  # type: ignore
+    elif "manifest" in event:
+        manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event["manifest"])  # type: ignore else:
+    else:
+        manifest: tm.IDPManifest = tm.IDPManifestSchema().load(event)  # type: ignore
         
-        # Write the document classification to S3
-        s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
-        output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".json"
-        s3.put_object(Body=bytes(
-            output_text.encode('UTF-8')),
-                    Bucket=s3_output_bucket,
-                    Key=output_bucket_key)
-
-    except bedrock_rt.exceptions.ThrottlingException as te:
-        raise ThrottlingException(te)
-
-    except bedrock_rt.exceptions.ModelNotReadyException as mnr:
-        raise ModelNotReadyException(mnr)
-
-    except bedrock_rt.exceptions.ModelTimeoutException as mt:
-        raise ModelTimeoutException(mt)
-
-    except bedrock_rt.exceptions.ServiceQuotaExceededException as sqe:
-        raise ServiceQuotaExceededException(sqe)
-
-    event['bedrock_output'] = f"s3://{s3_output_bucket}/{output_bucket_key}"
+    # Load source image from S3
+    if (
+        "manifest" in event
+        and "s3Path" in event["manifest"]
+    ):
+        image_path = event["manifest"]["s3Path"]
+    else:
+        raise ValueError(
+            "no ['manifest']['s3Path'] to get the text file from "
+        )
+        
+    source_pdf = get_pdf_file_from_s3(s3_path=image_path)
+    transformed_images = convert_from_bytes(source_pdf)
+   
+    buf = BytesIO()
+    transformed_images[0].save(buf, format='JPEG')
+    byte_string = buf.getvalue()
+    s3.put_object(Body=byte_string,Bucket="bedrockidpclaude3workflow-bedrockidpclaude3bucket0-pgrdbpkwtsfg",Key="temp/img.jpeg")
+    
     return event

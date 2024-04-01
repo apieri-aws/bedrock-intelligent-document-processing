@@ -94,7 +94,6 @@ def lambda_handler(event, _):
         raise Exception("no S3_OUTPUT_BUCKET set")
     if not s3_output_prefix:
         raise Exception("no S3_OUTPUT_PREFIX set")
-        
     # Get manifest file from event context
     try:
         if "Payload" in event and "manifest" in event["Payload"]:

@@ -1,6 +1,6 @@
 {
     "manifest": {
-        "s3Path": "s3://bedrockidpclaude3workflow-bedrockidpclaude3bucket0-pgrdbpkwtsfg/uploads/unc_paystub.pdf"
+        "s3Path": "s3://opensearchworkflow-opensearchworkflowbucket68e805-1sftyrox2dazy/textract-output/TENCENT MUSIC ENTERTAINMENT GROUP-p118/2023-05-18T22:05:30.279754/0-0.pdf"
     },
     "numberOfPages": 1,
     "mime": "application/pdf",

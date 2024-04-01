@@ -28,6 +28,7 @@ class BedrockIDPClaude3Workflow(Stack):
         script_location = os.path.dirname(__file__)
         s3_upload_prefix = "uploads"
         s3_output_prefix = "textract-output"
+        s3_converted_pdf_prefix = "converted-pdfs"
         s3_csv_output_prefix = "csv-output"
         s3_split_document_prefix = "textract-split-documents"
         s3_txt_output_prefix = "textract-text-output"
@@ -82,6 +83,34 @@ class BedrockIDPClaude3Workflow(Stack):
             textract_decider_max_retries=10000,
             s3_input_bucket=document_bucket.bucket_name,
             s3_input_prefix=s3_upload_prefix,
+        )
+        
+        # Converts single page PDFs to JPEGs for Claude 3 image capabilities
+        pdf_converter_function: lambda_.IFunction = lambda_.DockerImageFunction(  # type: ignore
+            self,
+            "PDFConverterFunction",
+            code=lambda_.DockerImageCode.from_image_asset(
+                os.path.join(script_location, "../lambda/pdf_converter")
+            ),
+            memory_size=128,
+            timeout=Duration.seconds(900),
+            architecture=lambda_.Architecture.X86_64,
+            environment={
+                "LOG_LEVEL": "DEBUG",
+                "S3_OUTPUT_PREFIX": s3_converted_pdf_prefix,
+                "S3_OUTPUT_BUCKET": document_bucket.bucket_name
+            },
+        )
+
+        # Grant classification function permissions to Systems Manager and Bedrock
+        document_bucket.grant_read_write(pdf_converter_function)
+
+        # Bedrock classification task for document chain
+        pdf_converter_task = tasks.LambdaInvoke(
+            self,
+            "PDFConverter",
+            lambda_function=pdf_converter_function,
+            output_path="$.Payload",
         )
         
         # The splitter takes a document and splits into the max_number_of_pages_per_document
@@ -401,12 +430,6 @@ class BedrockIDPClaude3Workflow(Stack):
 
         map.iterator(textract_sync_task)
         
-        # Determine if file is an image or pdf
-        is_supported_image_type = sfn.Condition.or_(
-            sfn.Condition.string_equals("$.mime", "image/jpeg"),
-            sfn.Condition.string_equals("$.mime", "image/png"),
-        )
-        
         doc_chain = (
             sfn.Chain.start(document_splitter_task).next(map)    
         )
@@ -434,16 +457,37 @@ class BedrockIDPClaude3Workflow(Stack):
             sfn.Chain.start(bedrock_image_classification_task).next(image_type_router)  
         )
         
+        # Determine if file is an image or pdf
+        is_supported_image_type = sfn.Condition.or_(
+            sfn.Condition.string_equals("$.mime", "image/jpeg"),
+            sfn.Condition.string_equals("$.mime", "image/png")
+        )
+        
         # Route docs to doc chain, route images to image chain
         doc_image_router = (
             sfn.Choice(self, "RouteDocsAndImages")
             .when(is_supported_image_type, image_chain)
             .otherwise(doc_chain)
         )
+        
+        pdf_converter_chain = (
+            sfn.Chain.start(pdf_converter_task).next(doc_image_router)  
+        )
+        
+        is_simple_pdf = sfn.Condition.and_(
+            sfn.Condition.string_equals("$.mime", "application/pdf"),
+            sfn.Condition.number_equals("$.numberOfPages", 1)
+        )
+        
+        simple_pdf_checker = (
+            sfn.Choice(self, "SimplePDFChecker")
+            .when(is_simple_pdf, pdf_converter_chain)
+            .otherwise(doc_image_router)
+        )
 
         # Define workflow chain before map state
         workflow_chain = (
-            sfn.Chain.start(decider_task).next(doc_image_router)
+            sfn.Chain.start(decider_task).next(simple_pdf_checker)
         )
 
         # GENERIC
