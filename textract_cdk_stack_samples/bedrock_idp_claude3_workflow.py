@@ -65,16 +65,23 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         
         # Create Systems Manager parameters on initial deployment
-        birth_certificate_parameter = ssm.CfnParameter(self, "BirthCertificateParameter",
-            type="String",
-            value="Given the document, extract the relevant information for validating the identity of the person. Export the information in JSON format. Only export the JSON information and no explaining text. Put all values in double quotes. Added in"
-        )
+        # classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
+        #     type="String",
+        #     name="/BedrockIDP/CLASSIFICATION",
+        #     value="Give the document one of the following classifications: {'PAYSTUB': a paystub, 'BANK_STATEMENT': a bank statement, 'BIRTH_CERTIFICATE': a birth certificate, 'OTHER': something else} return only a JSON in the following format {'CLASSIFCIATION': result} and do not output any other text than the JSON."
+        # )
         
-        bank_statement_parameter = ssm.CfnParameter(self, "BankStatementParameter",
-            type="String",
-            name="/BedrockIDP/BANK_STATEMENT",
-            value="Given the document, as a information extraction process, export the transaction table in CSV from format with the column names 'date' in the format 'YYYY-MM-DD', 'description', 'withdrawls', 'deposits', 'balance'. Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out 'Here is the extracted CSV data from the bank statement document' and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes."
-        )
+        # birth_certificate_parameter = ssm.CfnParameter(self, "BirthCertificateParameter",
+        #     type="String",
+        #     name="/BedrockIDP/BIRTH_CERTIFICATE",
+        #     value="Given the document, extract the relevant information for validating the identity of the person. Export the information in JSON format. Only export the JSON information and no explaining text. Put all values in double quotes. Added in"
+        # )
+        
+        # bank_statement_parameter = ssm.CfnParameter(self, "BankStatementParameter",
+        #     type="String",
+        #     name="/BedrockIDP/BANK_STATEMENT",
+        #     value="Given the document, as a information extraction process, export the transaction table in CSV from format with the column names 'date' in the format 'YYYY-MM-DD', 'description', 'withdrawls', 'deposits', 'balance'. Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out 'Here is the extracted CSV data from the bank statement document' and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes."
+        # )
 
         # Decider checks if the document is of valid format and gets the number of pages
         decider_task = tcdk.TextractPOCDecider(

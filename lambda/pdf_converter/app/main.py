@@ -1,5 +1,5 @@
 """
-Converts single page PDFs to PNGs
+Converts single page PDFs to JPEGs
 """
 import json
 import logging
@@ -95,7 +95,7 @@ def lambda_handler(event, _):
     
     s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
     output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".jpeg"
-    s3.put_object(Body=byte_string,Bucket="bedrockidpclaude3workflow-bedrockidpclaude3bucket0-pgrdbpkwtsfg",Key=output_bucket_key)
+    s3.put_object(Body=byte_string, Bucket=s3_output_bucket, Key=output_bucket_key)
     
     event['manifest']['s3Path'] = f"s3://{s3_output_bucket}/{output_bucket_key}"
     event['mime'] = "image/jpeg"
