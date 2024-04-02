@@ -1,5 +1,5 @@
 """
-kicks off Step Function executions
+Handles Bedrock calls for document classification and extraction
 """
 import json
 import logging
@@ -92,6 +92,7 @@ def lambda_handler(event, _):
         raise Exception("no S3_OUTPUT_BUCKET set")
     if not s3_output_prefix:
         raise Exception("no S3_OUTPUT_PREFIX set")
+        
     # Get manifest file from event context
     try:
         if "Payload" in event and "manifest" in event["Payload"]:
@@ -143,14 +144,15 @@ def lambda_handler(event, _):
 
         document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
         
+        # Configure system prompt, which is used to define context to Claude before presenting it with the prompt & supporting document text
         system_config = f"You are an AI assistant that performs document classification and extraction tasks. Given the following document <text>{{{document_text}}}</text>, answer the user's questions"
         
-        logger.debug(system_config)
-        
+        # Configure prompt
         message_config = [
             {"role": "user", "content": [{"type": "text", "text": prompt}]}
         ]
-                
+        
+        # Call Bedrock
         response = generate_message(
             bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, system=system_config, messages=message_config, max_tokens=512, temp=0.2, top_p=0.9
         )

@@ -1,5 +1,5 @@
 """
-kicks off Step Function executions
+Handles Bedrock calls for image classification and extraction
 """
 import json
 import logging
@@ -29,7 +29,7 @@ def split_s3_path_to_bucket_and_key(s3_path: str) -> Tuple[str, str]:
         )
 
 
-def get_image_file_from_s3(s3_path: str, range=None) -> bytes:
+def get_file_from_s3(s3_path: str, range=None) -> bytes:
     s3_bucket, s3_key = split_s3_path_to_bucket_and_key(s3_path)
     if range:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key, Range=range)
@@ -144,15 +144,17 @@ def lambda_handler(event, _):
                 "no ['manifest']['s3Path'] to get the text file from "
             )
 
-        image = get_image_file_from_s3(s3_path=image_path).decode('utf-8')
+        image = get_file_from_s3(s3_path=image_path).decode('utf-8')
 
         logger.debug(prompt)
         
         mime_type = ""
+        
         # Get mime type
         if "mime" in event:
             mime_type = event["mime"]
             
+        # Configure system prompt, which is used to define context to Claude before presenting it with the prompt & supporting document
         system_config = "You are an AI assistant that performs document classification and extraction tasks. Given the document, answer the user's questions"
         
         # Configure prompt
@@ -164,6 +166,7 @@ def lambda_handler(event, _):
              ]}
         ]
         
+        # Call Bedrock
         response = generate_message(
             bedrock_runtime=bedrock_rt, model_id=bedrock_model_id, system=system_config, messages=message_config, max_tokens=512, temp=0.2, top_p=0.9
         )
@@ -178,14 +181,15 @@ def lambda_handler(event, _):
 
         logger.debug(response)
         
-        # If our task was classification, add the image classification to the event context        
+        # If our task is classification, add the image classification to the event context        
         if parameter_name == "CLASSIFICATION":
             classification_json = json.loads(output_text)
             image_type = classification_json['CLASSIFICATION']
             
             classification_dict = {"imageType": image_type}
             event['classification'] = classification_dict
-
+        
+        # Write the document classification to S3
         s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
         output_bucket_key = s3_output_prefix + "/" + s3_filename + str(uuid4()) + ".json"
         s3.put_object(Body=bytes(

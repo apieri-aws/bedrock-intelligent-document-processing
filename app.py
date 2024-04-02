@@ -2,7 +2,7 @@
 import aws_cdk as cdk
 
 
-from textract_cdk_stack_samples.bedrock_idp_claude3_workflow import BedrockIDPClaude3Workflow
+from cdk_stack_workflows.bedrock_idp_claude3_workflow import BedrockIDPClaude3Workflow
 
 app = cdk.App()
 
