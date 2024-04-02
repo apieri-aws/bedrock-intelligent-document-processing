@@ -26,14 +26,16 @@ class BedrockIDPClaude3Workflow(Stack):
         )
 
         script_location = os.path.dirname(__file__)
+        
+        # Set S3 prefixes for file outputs at different stages of the IDP workflow
         s3_upload_prefix = "uploads"
-        s3_output_prefix = "textract-output"
-        s3_converted_pdf_prefix = "converted-pdfs"
-        s3_csv_output_prefix = "csv-output"
-        s3_split_document_prefix = "textract-split-documents"
+        s3_converted_pdf_prefix = "converted-pdf-output"
+        s3_split_document_prefix = "split-document-output"
+        s3_csv_output_prefix = "forms-tables-output"
+        s3_textract_output_prefix = "textract-output"
         s3_txt_output_prefix = "textract-text-output"
-        s3_bedrock_classification_output_prefix = 'bedrock-classification-output'
-        s3_bedrock_extraction_output_prefix = 'bedrock-extraction-output'
+        s3_bedrock_classification_output_prefix = "bedrock-classification-output"
+        s3_bedrock_extraction_output_prefix = "bedrock-extraction-output"
 
         workflow_name = "BedrockIDPClaude3"
         current_region = Stack.of(self).region
@@ -68,7 +70,7 @@ class BedrockIDPClaude3Workflow(Stack):
         # classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
         #     type="String",
         #     name="/BedrockIDP/CLASSIFICATION",
-        #     value="Give the document one of the following classifications: {'PAYSTUB': a paystub, 'BANK_STATEMENT': a bank statement, 'BIRTH_CERTIFICATE': a birth certificate, 'OTHER': something else} return only a JSON in the following format {'CLASSIFCIATION': result} and do not output any other text than the JSON."
+        #     value="Give the document one of the following classifications: {PAYSTUB: a paystub, BANK_STATEMENT: a bank statement, BIRTH_CERTIFICATE: a birth certificate, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."
         # )
         
         # birth_certificate_parameter = ssm.CfnParameter(self, "BirthCertificateParameter",
@@ -81,6 +83,18 @@ class BedrockIDPClaude3Workflow(Stack):
         #     type="String",
         #     name="/BedrockIDP/BANK_STATEMENT",
         #     value="Given the document, as a information extraction process, export the transaction table in CSV from format with the column names 'date' in the format 'YYYY-MM-DD', 'description', 'withdrawls', 'deposits', 'balance'. Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out 'Here is the extracted CSV data from the bank statement document' and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes."
+        # )
+        
+        # paystub_parameter = ssm.CfnParameter(self, "PaystubParameter",
+        #     type="String",
+        #     name="/BedrockIDP/PAYSTUB",
+        #     value="""Given the document, as a information extraction process, export the following values: YTD TOTAL GROSS PAY, YTD TOTAL TAXES, YTD TOTAL DEDUCTIONS, YTD NET PAY. Format responses in JSON format, for example:
+
+        #     {
+        #     ‘YTD TOTAL GROSS PAY’: 'value'
+        #     }
+            
+        #     where the value is extracted from the document. Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
         # )
 
         # Decider checks if the document is of valid format and gets the number of pages
@@ -155,7 +169,7 @@ class BedrockIDPClaude3Workflow(Stack):
             self,
             "TextractSync",
             s3_output_bucket=document_bucket.bucket_name,
-            s3_output_prefix=s3_output_prefix,
+            s3_output_prefix=s3_textract_output_prefix,
             integration_pattern=sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
             lambda_log_level="DEBUG",
             timeout=Duration.hours(24),
@@ -169,14 +183,14 @@ class BedrockIDPClaude3Workflow(Stack):
             }),
             result_path="$.textract_result")
             
-        # Generates CSV data based on Texctract features defined in manifest file in ../lambda/start_with_all_features
+        # Generates CSV data based on Texctract features defined in map state initialization
         generate_csv = tcdk.TextractGenerateCSV(
             self,
             "GenerateFormsTables",
             csv_s3_output_bucket=document_bucket.bucket_name,
             csv_s3_output_prefix=s3_csv_output_prefix,
             s3_input_bucket=document_bucket.bucket_name,
-            s3_input_prefix=s3_output_prefix,
+            s3_input_prefix=s3_textract_output_prefix,
             lambda_log_level="DEBUG",
             output_type='CSV',
             integration_pattern=sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
