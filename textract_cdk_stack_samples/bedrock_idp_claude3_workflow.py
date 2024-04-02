@@ -122,16 +122,32 @@ class BedrockIDPClaude3Workflow(Stack):
         
         # The splitter takes a document and splits into the max_number_of_pages_per_document
         # This is particulary useful when working with documents that exceed the Textract limits or when the workflow requires per page processing
-        document_splitter_task = tcdk.DocumentSplitter(
+        document_splitter_function: lambda_.IFunction = lambda_.DockerImageFunction(
+            self,
+            "DocSplitterFunction",
+            code=lambda_.DockerImageCode.from_image_asset(
+                os.path.join(script_location, "../lambda/document_splitter")
+            ),
+            memory_size=128,
+            timeout=Duration.seconds(900),
+            architecture=lambda_.Architecture.X86_64,
+            environment={
+                "LOG_LEVEL": "DEBUG",
+                "S3_OUTPUT_PREFIX": s3_split_document_prefix,
+                "S3_OUTPUT_BUCKET": document_bucket.bucket_name,
+                "max_number_of_pages_per_doc": "1"
+            },
+        )
+
+        # Grant classification function permissions to Systems Manager and Bedrock
+        document_bucket.grant_read_write(document_splitter_function)
+
+        # Bedrock classification task for document chain
+        document_splitter_task = tasks.LambdaInvoke(
             self,
             "DocSplitter",
-            s3_output_bucket=s3_output_bucket,
-            s3_output_prefix=s3_split_document_prefix,
-            s3_input_bucket=document_bucket.bucket_name,
-            s3_input_prefix=s3_upload_prefix,
-            max_number_of_pages_per_doc=1,
-            lambda_log_level="INFO",
-            textract_document_splitter_max_retries=10000,
+            lambda_function=document_splitter_function,
+            output_path="$.Payload",
         )
 
         # Call Textract sync on document chain
