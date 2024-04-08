@@ -23,7 +23,7 @@
 # Deployment
 1. Create a new directory, navigate to that directory in a terminal and clone the GitHub repository:
     ```
-    git clone https://github.com/TODO
+    git clone https://github.com/apieri-aws/fsi-idp-with-bedrock.git
     ```
 2. Change directory to the pattern directory:
     ```
