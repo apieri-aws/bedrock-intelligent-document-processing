@@ -70,35 +70,23 @@ class BedrockIDPClaude3Workflow(Stack):
         )
         
         # Create Systems Manager parameters on initial deployment
-        # classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
-        #     type="String",
-        #     name="/BedrockIDP/CLASSIFICATION",
-        #     value="Give the document one of the following classifications: {PAYSTUB: a paystub, BANK_STATEMENT: a bank statement, BIRTH_CERTIFICATE: a birth certificate, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."
-        # )
+        classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
+            type="String",
+            name="/BedrockIDP/CLASSIFICATION",
+            value="Give the document one of the following classifications: {INVOICE: a invoice, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."
+        )
         
-        # birth_certificate_parameter = ssm.CfnParameter(self, "BirthCertificateParameter",
-        #     type="String",
-        #     name="/BedrockIDP/BIRTH_CERTIFICATE",
-        #     value="Given the document, extract the relevant information for validating the identity of the person. Export the information in JSON format. Only export the JSON information and no explaining text. Put all values in double quotes. Added in"
-        # )
-        
-        # bank_statement_parameter = ssm.CfnParameter(self, "BankStatementParameter",
-        #     type="String",
-        #     name="/BedrockIDP/BANK_STATEMENT",
-        #     value="Given the document, as a information extraction process, export the transaction table in CSV from format with the column names 'date' in the format 'YYYY-MM-DD', 'description', 'withdrawls', 'deposits', 'balance'. Only export the CSV information and no explaining text. Only use information from the document and do not output any lines without credit or debit information. Do not print out 'Here is the extracted CSV data from the bank statement document' and do not print out the back ticks. DELIMITER is comma and QUOTE CHARACTER is double quotes."
-        # )
-        
-        # paystub_parameter = ssm.CfnParameter(self, "PaystubParameter",
-        #     type="String",
-        #     name="/BedrockIDP/PAYSTUB",
-        #     value="""Given the document, as a information extraction process, export the following values: YTD TOTAL GROSS PAY, YTD TOTAL TAXES, YTD TOTAL DEDUCTIONS, YTD NET PAY. Format responses in JSON format, for example:
+        invoice_parameter = ssm.CfnParameter(self, "InvoiceParameter",
+            type="String",
+            name="/BedrockIDP/INVOICE",
+            value="""Given the document, as a information extraction process, export the following values: TOTAL CHARGES, ADDRESS, INVOICE NUMBER. Format responses in JSON format, for example:
 
-        #     {
-        #     ‘YTD TOTAL GROSS PAY’: 'value'
-        #     }
+            {
+            ‘INVOICE NUMBER’: 'value'
+            }
             
-        #     where the value is extracted from the document. Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
-        # )
+            where the value is extracted from the document. Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
+        )
         
         '''
         We will now define the Task states that will be executing the document preparation and IDP tasks in our state machine
@@ -430,15 +418,7 @@ class BedrockIDPClaude3Workflow(Stack):
         doc_type_choice = (
             sfn.Choice(self, "RouteDocType")
             .when(
-                sfn.Condition.string_equals("$.classification.documentType", "BANK_STATEMENT"),
-                bedrock_doc_extraction_task
-            )
-            .when(
-                sfn.Condition.string_equals("$.classification.documentType", "BIRTH_CERTIFICATE"),
-                bedrock_doc_extraction_task
-            )            
-            .when(
-                sfn.Condition.string_equals("$.classification.documentType", "PAYSTUB"),
+                sfn.Condition.string_equals("$.classification.documentType", "INVOICE"),
                 bedrock_doc_extraction_task
             )
             .otherwise(sfn.Pass(self, "No supported document classification"))
@@ -508,15 +488,7 @@ class BedrockIDPClaude3Workflow(Stack):
         image_type_router = (
             sfn.Choice(self, "RouteImageType")
             .when(
-                sfn.Condition.string_equals("$.classification.imageType", "BANK_STATEMENT"),
-                bedrock_image_extraction_task
-            )
-            .when(
-                sfn.Condition.string_equals("$.classification.imageType", "BIRTH_CERTIFICATE"),
-                bedrock_image_extraction_task
-            )            
-            .when(
-                sfn.Condition.string_equals("$.classification.imageType", "PAYSTUB"),
+                sfn.Condition.string_equals("$.classification.imageType", "INVOICE"),
                 bedrock_image_extraction_task
             )
             .otherwise(sfn.Pass(self, "No supported image classification"))
