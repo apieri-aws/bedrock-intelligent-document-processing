@@ -52,17 +52,23 @@
 
 ## Procedure
 
-S3 File Upload
+Upload a document to S3 to start the Step Functions Execution
 1. Create an environment variable in the AWS CLI for the S3 uploads bucket
 ```
 export S3_UPLOADS_FOLDER=$(aws cloudformation list-exports --query 'Exports[?Name==`BedrockIDPClaude3Workflow-DocumentUploadLocation`].Value' --output text)
 ```
 
-2. Copy a sample file to the S3 bucket to start the Step Functions execution
+2. Copy a sample file to the S3 bucket uploads folder
 ```
 aws s3 cp ../fsi-idp-with-bedrock/docs/insurance_invoice.png $S3_UPLOADS_FOLDER
 ```
 
+## Clean Up
+
+To save costs, delete the resources you deployed as part of the tutorial. Run the following command and follow the prompts to delete the CDK stack. 
+```
+cdk destroy BedrockIDPClaude3Workflow
+```
 
 
 
