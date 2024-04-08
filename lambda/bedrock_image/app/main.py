@@ -1,11 +1,12 @@
 """
-Handles Bedrock calls for document classification and extraction
+Handles Bedrock calls for image classification and extraction
 """
 import json
 import logging
 import os
 import textractmanifest as tm
 import boto3
+import base64
 from uuid import uuid4
 
 from typing import Tuple
@@ -34,7 +35,7 @@ def get_file_from_s3(s3_path: str, range=None) -> bytes:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key, Range=range)
     else:
         o = s3.get_object(Bucket=s3_bucket, Key=s3_key)
-    return o.get("Body").read()
+    return base64.b64encode(o.get("Body").read())
 
 
 class ThrottlingException(Exception):
@@ -57,6 +58,7 @@ def get_ssm_paramter(path):
     return ssm.get_parameter(Name=path, WithDecryption=True)
 
 def generate_message(bedrock_runtime, model_id, system, messages, max_tokens,top_p, temp):
+
     body=json.dumps(
         {
             "anthropic_version": "bedrock-2023-05-31",
@@ -64,7 +66,7 @@ def generate_message(bedrock_runtime, model_id, system, messages, max_tokens,top
             "system": system,
             "messages": messages,
             "temperature": temp,
-            "top_p": top_p,
+            "top_p": top_p
         }  
     )  
     
@@ -106,18 +108,18 @@ def lambda_handler(event, _):
         if fixed_key:
             parameter_name = fixed_key
         else:
-            if "classification" in event and "documentType" in event["classification"]:
-                parameter_name = event["classification"]["documentType"]
-                logger.debug(f"document_type: {parameter_name}")
+            if "classification" in event and "imageType" in event["classification"]:
+                parameter_name = event["classification"]["imageType"]
+                logger.debug(f"image_type: {parameter_name}")
             else:
                 raise ValueError(
-                    f"no [classification][documentType] given in event: {event}"
+                    f"no [classification][imageType] given in event: {event}"
                 )
-                
-        # Get SSM parameter path for prompt        
+        
+        # Get SSM parameter path for prompt 
         parameter_path = f"/BedrockIDP/{parameter_name}"
         ssm_response = get_ssm_paramter(parameter_path)
-
+        
         # Load prompt from SSM
         prompt = ""
         
@@ -130,26 +132,38 @@ def lambda_handler(event, _):
             raise ValueError(
                 "no ['Value'] in parameter store "
             )
-            
-        # Load text document from S3
+
+        # Load source image from S3
         if (
-            "txt_output_location" in event
-            and "TextractOutputCSVPath" in event["txt_output_location"]
+            "manifest" in event
+            and "s3Path" in event["manifest"]
         ):
-            document_text_path = event["txt_output_location"]["TextractOutputCSVPath"]
+            image_path = event["manifest"]["s3Path"]
         else:
             raise ValueError(
-                "no ['txt_output_location']['TextractOutputCSVPath'] to get the text file from "
+                "no ['manifest']['s3Path'] to get the text file from "
             )
 
-        document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
+        image = get_file_from_s3(s3_path=image_path).decode('utf-8')
+
+        logger.debug(prompt)
         
-        # Configure system prompt, which is used to define context to Claude before presenting it with the prompt & supporting document text
-        system_config = f"You are an AI assistant that performs document classification and extraction tasks. Given the following document <text>{{{document_text}}}</text>, answer the user's questions"
+        mime_type = ""
+        
+        # Get mime type
+        if "mime" in event:
+            mime_type = event["mime"]
+            
+        # Configure system prompt, which is used to define context to Claude before presenting it with the prompt & supporting document
+        system_config = "You are an AI assistant that performs document classification and extraction tasks. Given the document, answer the user's questions"
         
         # Configure prompt
         message_config = [
-            {"role": "user", "content": [{"type": "text", "text": prompt}]}
+            {"role": "user", 
+             "content": [
+                 {"type": "image","source": { "type": "base64","media_type": mime_type,"data": image}},
+                 {"type": "text", "text": prompt}
+             ]}
         ]
         
         # Call Bedrock
@@ -160,18 +174,20 @@ def lambda_handler(event, _):
         if "completion" in response:
             output_text = response['completion']
         elif "content" in response:
-            output_text =response['content'][0]['text']
+            output_text = response['content'][0]['text']
             logger.debug(output_text)
         else:
             output_text = ""
 
         logger.debug(response)
-
-        # If our task is classification, add the document classification to the event context
+        
+        # If our task is classification, add the image classification to the event context        
         if parameter_name == "CLASSIFICATION":
             classification_json = json.loads(output_text)
-            document_type = classification_json['CLASSIFICATION']
-            event.setdefault('classification', {})['documentType'] = document_type
+            image_type = classification_json['CLASSIFICATION']
+            
+            classification_dict = {"imageType": image_type}
+            event['classification'] = classification_dict
         
         # Write the document classification to S3
         s3_filename, _ = os.path.splitext(os.path.basename(manifest.s3_path))
