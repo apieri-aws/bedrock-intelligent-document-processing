@@ -17,8 +17,9 @@
 * [Create an AWS account](https://portal.aws.amazon.com/gp/aws/developer/registration/index.html) if you do not already have one and log in. The IAM user that you use must have sufficient permissions to make necessary AWS service calls and manage AWS resources.
 * [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) installed and configured
 * [Git Installed](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-* [AWS CDK Toolkit](https://docs.aws.amazon.com/cdk/latest/guide/cli.html) installed and configured
+* [AWS CDK Toolkit](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_install) installed and configured
 * [Python 3.9+](https://www.python.org/downloads/) installed
+* [Docker](https://docs.docker.com/get-docker/) installed or as an alternative use [AWS Cloud9](https://aws.amazon.com/cloud9/) IDE that has Docker already installed
 
 # Deployment
 1. Create a new directory, navigate to that directory in a terminal and clone the GitHub repository:
@@ -50,7 +51,7 @@
     cdk deploy BedrockIDPClaude3Workflow
     ```
 
-## Procedure
+# Procedure
 
 Upload a document to S3 to start the Step Functions Execution
 1. Create an environment variable in the AWS CLI for the S3 uploads bucket
@@ -60,10 +61,13 @@ export S3_UPLOADS_FOLDER=$(aws cloudformation list-exports --query 'Exports[?Nam
 
 2. Copy a sample file to the S3 bucket uploads folder
 ```
-aws s3 cp ../fsi-idp-with-bedrock/docs/insurance_invoice.png $S3_UPLOADS_FOLDER
+aws s3 cp docs/insurance_invoice.png $S3_UPLOADS_FOLDER
 ```
 
-## Clean Up
+# Prompts
+TODO
+
+# Clean Up
 
 To save costs, delete the resources you deployed as part of the tutorial. Run the following command and follow the prompts to delete the CDK stack. 
 ```
