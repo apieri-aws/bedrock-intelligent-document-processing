@@ -73,19 +73,20 @@ class BedrockIDPClaude3Workflow(Stack):
         classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
             type="String",
             name="/BedrockIDP/CLASSIFICATION",
-            value="Give the document one of the following classifications: {INVOICE: a invoice, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."
+            value="""Give the document one of the following classifications: {INVOICE: a invoice, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."""
         )
         
         invoice_parameter = ssm.CfnParameter(self, "InvoiceParameter",
             type="String",
             name="/BedrockIDP/INVOICE",
-            value="""Given the document, as a information extraction process, export the following values: TOTAL CHARGES, ADDRESS, INVOICE NUMBER. Format responses in JSON format, for example:
-
+            value="""Given the document, as a information extraction process, export the following values: TOTAL CHARGES, ADDRESS, INVOICE NUMBER. Format responses in JSON format, for example
+            <example>
             {
             ‘INVOICE NUMBER’: 'value'
             }
-            
-            where the value is extracted from the document. Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
+            </example>
+            where the value is extracted from the document. 
+            Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
         )
         
         '''

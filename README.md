@@ -16,10 +16,11 @@
 # Requirements
 * [Create an AWS account](https://portal.aws.amazon.com/gp/aws/developer/registration/index.html) if you do not already have one and log in. The IAM user that you use must have sufficient permissions to make necessary AWS service calls and manage AWS resources.
 * [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html) installed and configured
-* [Git Installed](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
+* [Git installed](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
 * [AWS CDK Toolkit](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html#getting_started_install) installed and configured
 * [Python 3.9+](https://www.python.org/downloads/) installed
 * [Docker](https://docs.docker.com/get-docker/) installed or as an alternative use [AWS Cloud9](https://aws.amazon.com/cloud9/) IDE that has Docker already installed
+* [Claude 3 Sonnet model access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html)
 
 # Deployment
 1. Create a new directory, navigate to that directory in a terminal and clone the GitHub repository:
