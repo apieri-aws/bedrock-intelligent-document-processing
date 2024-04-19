@@ -69,25 +69,25 @@ class BedrockIDPClaude3Workflow(Stack):
             filters=[s3.NotificationKeyFilter(prefix=s3_upload_prefix)],
         )
         
-        # Create Systems Manager parameters on initial deployment
-        classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
-            type="String",
-            name="/BedrockIDP/CLASSIFICATION",
-            value="""Give the document one of the following classifications: {INVOICE: a invoice, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."""
-        )
+        # # Create Systems Manager parameters on initial deployment
+        # classification_parameter = ssm.CfnParameter(self, "ClassificationParameter",
+        #     type="String",
+        #     name="/BedrockIDP/CLASSIFICATION",
+        #     value="""Give the document one of the following classifications: {INVOICE: a invoice, OTHER: something else} return only a JSON in the following format {CLASSIFCIATION: result} with CLASSIFICATION remaining the same and result being one of the listed classifications. Put the values in double quotes and do not output any text other than the JSON."""
+        # )
         
-        invoice_parameter = ssm.CfnParameter(self, "InvoiceParameter",
-            type="String",
-            name="/BedrockIDP/INVOICE",
-            value="""Given the document, as a information extraction process, export the following values: TOTAL CHARGES, ADDRESS, INVOICE NUMBER. Format responses in JSON format, for example
-            <example>
-            {
-            ‘INVOICE NUMBER’: 'value'
-            }
-            </example>
-            where the value is extracted from the document. 
-            Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
-        )
+        # invoice_parameter = ssm.CfnParameter(self, "InvoiceParameter",
+        #     type="String",
+        #     name="/BedrockIDP/INVOICE",
+        #     value="""Given the document, as a information extraction process, export the following values: TOTAL CHARGES, ADDRESS, INVOICE NUMBER. Format responses in JSON format, for example
+        #     <example>
+        #     {
+        #     ‘INVOICE NUMBER’: 'value'
+        #     }
+        #     </example>
+        #     where the value is extracted from the document. 
+        #     Do not include any commas in the numeric values. Use double quotes for all values. Do not include any text besides the JSON output"""
+        # )
         
         '''
         We will now define the Task states that will be executing the document preparation and IDP tasks in our state machine
@@ -207,7 +207,7 @@ class BedrockIDPClaude3Workflow(Stack):
             "FormatTextractOutput",
             csv_s3_output_bucket=document_bucket.bucket_name,
             csv_s3_output_prefix=s3_txt_output_prefix,
-            output_type="LINES",
+            output_type="LINEARIZED",
             lambda_log_level="DEBUG",
             integration_pattern=sfn.IntegrationPattern.WAIT_FOR_TASK_TOKEN,
             input=sfn.TaskInput.from_object(
@@ -462,7 +462,8 @@ class BedrockIDPClaude3Workflow(Stack):
                     ),
                     "textractFeatures": [
                       "FORMS",
-                      "TABLES"
+                      "TABLES",
+                      "LAYOUT"
                     ]
                 },
                 "mime": sfn.JsonPath.string_at("$.mime"),

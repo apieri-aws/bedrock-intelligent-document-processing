@@ -134,12 +134,12 @@ def lambda_handler(event, _):
         # Load text document from S3
         if (
             "txt_output_location" in event
-            and "TextractOutputCSVPath" in event["txt_output_location"]
+            and "TextractOutputLinearizedPath" in event["txt_output_location"]
         ):
-            document_text_path = event["txt_output_location"]["TextractOutputCSVPath"]
+            document_text_path = event["txt_output_location"]["TextractOutputLinearizedPath"]
         else:
             raise ValueError(
-                "no ['txt_output_location']['TextractOutputCSVPath'] to get the text file from "
+                "no ['txt_output_location']['TextractOutputLinearizedPath'] to get the text file from "
             )
 
         document_text = get_file_from_s3(s3_path=document_text_path).decode('utf-8')
