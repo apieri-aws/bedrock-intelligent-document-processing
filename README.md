@@ -65,9 +65,6 @@ export S3_UPLOADS_FOLDER=$(aws cloudformation list-exports --query 'Exports[?Nam
 aws s3 cp docs/insurance_invoice.png $S3_UPLOADS_FOLDER
 ```
 
-# Prompts
-TODO
-
 # Clean Up
 
 To save costs, delete the resources you deployed as part of the tutorial. Run the following command and follow the prompts to delete the CDK stack. 
