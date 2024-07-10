@@ -47,7 +47,11 @@
     ```
     pip install -r requirements.txt
     ```
-6. Deploy the CDK stack:
+6. If necessary, bootstrap your environment:
+   ```
+   cdk bootstrap
+   ```
+7. Deploy the CDK stack:
     ```
     cdk deploy BedrockIDPClaude3Workflow
     ```
