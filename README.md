@@ -29,7 +29,7 @@
     ```
 2. Change directory to the pattern directory:
     ```
-    cd fsi-idp-with-bedrock
+    cd bedrock-intelligent-document-processing
     ```
 3. Create a virtual environment for Python
     ```
