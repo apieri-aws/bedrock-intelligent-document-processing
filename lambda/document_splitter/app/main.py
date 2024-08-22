@@ -165,7 +165,9 @@ def lambda_handler(event, _):
     logger.info(f"amazon-textract-idp-cdk-manifest: {tm.__version__}")
     logger.info(json.dumps(event))
 
-    # s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET', None)
+    s3_output_bucket = os.environ.get('S3_OUTPUT_BUCKET', None)
+    s3_output_prefix="textract-split-documents"
+
     # if not s3_output_bucket:
     #     raise Exception("no S3_OUTPUT_BUCKET set")
 
@@ -173,12 +175,12 @@ def lambda_handler(event, _):
     # if not s3_output_prefix:
     #     raise Exception("no S3_OUTPUT_PREFIX set")
     
-    s3_output_bucket="bedrockidpclaude3workflow-bedrockidpclaude3bucket0-pgrdbpkwtsfg"
-    s3_output_prefix="textract-split-documents"
+    # s3_output_bucket="bedrockidpclaude3workflow-bedrockidpclaude3bucket0-pgrdbpkwtsfg"
+    # s3_output_prefix="textract-split-documents"
 
     max_number_of_pages_per_doc = int(
         os.environ.get('MAX_NUMBER_OF_PAGES_PER_DOC', "1"))
-
+    
     logger.debug(f"S3_OUTPUT_BUCKET: {s3_output_bucket} \
      S3_OUTPUT_PREFIX: {s3_output_prefix} \
      MAX_NUMBER_OF_PAGES_PER_DOC: {max_number_of_pages_per_doc}")
